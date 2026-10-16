@@ -1,3 +1,4 @@
+import { NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -20,11 +21,18 @@ type FindManyArgs = {
   take: number;
 };
 
+type FindFirstArgs = {
+  where: { id: number; status: string };
+};
+
 describe('CatalogService', () => {
   let service: CatalogService;
   let findMany: jest.Mock;
   let count: jest.Mock;
+  let findFirst: jest.Mock;
   let capturedFindManyArgs: FindManyArgs[];
+  let capturedFindFirstArgs: FindFirstArgs[];
+  let findFirstResult: { id: number; name: string; category: null } | null;
 
   beforeEach(async () => {
     capturedFindManyArgs = [];
@@ -33,10 +41,19 @@ describe('CatalogService', () => {
       return Promise.resolve([] as { id: number; name: string }[]);
     });
     count = jest.fn().mockResolvedValue(0);
+    capturedFindFirstArgs = [];
+    findFirstResult = null;
+    findFirst = jest.fn((args: FindFirstArgs) => {
+      capturedFindFirstArgs.push(args);
+      return Promise.resolve(findFirstResult);
+    });
     const module = await Test.createTestingModule({
       providers: [
         CatalogService,
-        { provide: PrismaService, useValue: { product: { findMany, count } } },
+        {
+          provide: PrismaService,
+          useValue: { product: { findMany, count, findFirst } },
+        },
       ],
     }).compile();
     service = module.get(CatalogService);
@@ -117,6 +134,30 @@ describe('CatalogService', () => {
       limit: 10,
       total: 0,
       totalPages: 0,
+    });
+  });
+
+  describe('getActiveProduct', () => {
+    const sample: { id: number; name: string; category: null } = {
+      id: 9,
+      name: 'Alpha Notebook',
+      category: null,
+    };
+
+    it('returns the product when an active one exists', async () => {
+      findFirstResult = sample;
+
+      await expect(service.getActiveProduct(9)).resolves.toEqual(sample);
+      expect(capturedFindFirstArgs.at(-1)?.where).toEqual({
+        id: 9,
+        status: 'ACTIVE',
+      });
+    });
+
+    it('throws NotFoundException when the product is missing or inactive', async () => {
+      await expect(service.getActiveProduct(9)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
     });
   });
 

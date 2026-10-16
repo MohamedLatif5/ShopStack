@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -56,6 +56,19 @@ export class CatalogService {
         totalPages: Math.ceil(total / query.limit),
       },
     };
+  }
+
+  /** Public details are only served for active products; everything else is a 404. */
+  async getActiveProduct(id: number) {
+    const product = await this.prisma.product.findFirst({
+      where: { id, status: 'ACTIVE' },
+      select: PRODUCT_SELECT,
+    });
+
+    if (!product) {
+      throw new NotFoundException(`Product ${id} was not found`);
+    }
+    return product;
   }
 
   /** The public catalog always filters to active products, then narrows further. */

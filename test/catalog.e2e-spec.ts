@@ -27,6 +27,8 @@ describe('Catalog (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
   let booksId: number;
+  let alphaId: number;
+  let hiddenId: number;
 
   const makeProduct = (data: {
     name: string;
@@ -57,23 +59,25 @@ describe('Catalog (e2e)', () => {
     });
     booksId = books.id;
 
-    await makeProduct({
+    const alpha = await makeProduct({
       name: 'Alpha Notebook',
       pricePiasters: 1500,
       categoryId: books.id,
     });
+    alphaId = alpha.id;
     await makeProduct({
       name: 'Beta Notebook',
       pricePiasters: 500,
       categoryId: games.id,
     });
     await makeProduct({ name: 'Gamma Sticker Pack', pricePiasters: 2000 });
-    await makeProduct({
+    const hidden = await makeProduct({
       name: 'Hidden Ink',
       pricePiasters: 100,
       status: 'INACTIVE',
       categoryId: books.id,
     });
+    hiddenId = hidden.id;
   });
 
   afterAll(async () => {
@@ -235,6 +239,58 @@ describe('Catalog (e2e)', () => {
 
     expect(body.items.map((item) => item.name)).toEqual(['Alpha Notebook']);
   });
+
+  it('returns the details of an active product', async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/products/${alphaId}`)
+      .expect(200);
+    const body = res.body as ProductListItem;
+
+    expect(body).toEqual(
+      expect.objectContaining({
+        id: alphaId,
+        name: 'Alpha Notebook',
+        pricePiasters: 1500,
+        stock: 0,
+        category: { id: booksId, name: 'E2E Books' },
+      }),
+    );
+    expect(Object.keys(body).sort()).toEqual([
+      'category',
+      'createdAt',
+      'description',
+      'id',
+      'name',
+      'pricePiasters',
+      'stock',
+    ]);
+  });
+
+  it('does not expose an inactive product by id', async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/products/${hiddenId}`)
+      .expect(404);
+
+    expect((res.body as { error: string }).error).toBe('Not Found');
+  });
+
+  it('returns 404 for a product that does not exist', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/products/999999')
+      .expect(404);
+
+    expect((res.body as { error: string }).error).toBe('Not Found');
+  });
+
+  it.each(['/products/abc', '/products/0', '/products/-3'])(
+    'rejects an invalid product id in %s',
+    async (path) => {
+      const res = await request(app.getHttpServer()).get(path).expect(400);
+      const body = res.body as { error: string };
+
+      expect(body.error).toBe('Bad Request');
+    },
+  );
 
   it.each([
     'page=0',
