@@ -1,7 +1,7 @@
 {
-  "name": "nestjs-crud",
+  "name": "shopstack",
   "version": "0.0.1",
-  "description": "",
+  "description": "ShopStack e-commerce backend (NestJS portfolio project)",
   "author": "",
   "private": true,
   "license": "UNLICENSED",
