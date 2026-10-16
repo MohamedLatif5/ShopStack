@@ -1,31 +1,9 @@
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PrismaClient } from '@prisma/client';
+import { requireTestDatabaseUrl } from './helpers';
 
-// Loads the project .env (if present) without overriding real environment variables.
-// Deliberately tiny: it only needs to handle this project's simple KEY="value" format.
-function loadEnvFile(path: string): void {
-  for (const line of readFileSync(path, 'utf8').split('\n')) {
-    const match = line.match(/^\s*([A-Za-z0-9_]+)\s*=\s*(.*)\s*$/);
-    if (match) {
-      process.env[match[1]] ??= match[2].replace(/^["']|["']$/g, '');
-    }
-  }
-}
-
-try {
-  loadEnvFile(join(__dirname, '..', '.env'));
-} catch {
-  // .env is optional; fall back to the process environment (e.g. CI).
-}
-
-const testUrl = process.env.DATABASE_URL_TEST;
-if (!testUrl) {
-  throw new Error(
-    'DATABASE_URL_TEST is not set. Copy .env.example to .env and try again.',
-  );
-}
+const testUrl = requireTestDatabaseUrl();
 
 const testDbName = new URL(testUrl).pathname.split('/')[1];
 const adminUrl = new URL(testUrl);
