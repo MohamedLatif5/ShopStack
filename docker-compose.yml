@@ -1,0 +1,22 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: shopstack-db
+    environment:
+      POSTGRES_USER: shopstack
+      POSTGRES_PASSWORD: shopstack
+      POSTGRES_DB: shopstack_dev
+    ports:
+      # Host port 5433 to avoid clashing with an existing local PostgreSQL on 5432.
+      - "5433:5432"
+    volumes:
+      # Named volume: container restarts and `docker compose down` keep the data.
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shopstack -d shopstack_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres_data:
