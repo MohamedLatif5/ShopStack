@@ -26,6 +26,7 @@ interface ListResponse {
 describe('Catalog (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
+  let booksId: number;
 
   const makeProduct = (data: {
     name: string;
@@ -54,6 +55,7 @@ describe('Catalog (e2e)', () => {
     const games = await prisma.category.create({
       data: { name: 'E2E Games' },
     });
+    booksId = books.id;
 
     await makeProduct({
       name: 'Alpha Notebook',
@@ -167,6 +169,73 @@ describe('Catalog (e2e)', () => {
     ]);
   });
 
+  it('filters by category', async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/products?categoryId=${booksId}`)
+      .expect(200);
+    const body = res.body as ListResponse;
+
+    expect(body.items.map((item) => item.name)).toEqual(['Alpha Notebook']);
+    expect(body.meta.total).toBe(1);
+  });
+
+  it('searches by name case-insensitively', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/products?search=NOTEBOOK')
+      .expect(200);
+    const body = res.body as ListResponse;
+
+    expect(body.items.map((item) => item.name).sort()).toEqual([
+      'Alpha Notebook',
+      'Beta Notebook',
+    ]);
+    expect(body.meta.total).toBe(2);
+  });
+
+  it('never returns inactive products even when the search matches them', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/products?search=ink')
+      .expect(200);
+    const body = res.body as ListResponse;
+
+    expect(body.items).toEqual([]);
+    expect(body.meta.total).toBe(0);
+  });
+
+  it('filters by an exact price range', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/products?minPrice=600&maxPrice=1600')
+      .expect(200);
+    const body = res.body as ListResponse;
+
+    expect(body.items.map((item) => item.name)).toEqual(['Alpha Notebook']);
+  });
+
+  it('supports one-sided price filters', async () => {
+    const cheap = await request(app.getHttpServer())
+      .get('/products?maxPrice=1000')
+      .expect(200);
+    expect((cheap.body as ListResponse).items.map((item) => item.name)).toEqual(
+      ['Beta Notebook'],
+    );
+
+    const pricey = await request(app.getHttpServer())
+      .get('/products?minPrice=1600')
+      .expect(200);
+    expect(
+      (pricey.body as ListResponse).items.map((item) => item.name),
+    ).toEqual(['Gamma Sticker Pack']);
+  });
+
+  it('combines category, search, and sorting filters', async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/products?categoryId=${booksId}&search=notebook&sort=name_desc`)
+      .expect(200);
+    const body = res.body as ListResponse;
+
+    expect(body.items.map((item) => item.name)).toEqual(['Alpha Notebook']);
+  });
+
   it.each([
     'page=0',
     'page=abc',
@@ -174,6 +243,10 @@ describe('Catalog (e2e)', () => {
     'limit=oops',
     'sort=foo',
     'flavor=sweet',
+    'categoryId=abc',
+    'categoryId=0',
+    'minPrice=-1',
+    'minPrice=1000&maxPrice=500',
   ])('rejects invalid query %s', async (queryString) => {
     const res = await request(app.getHttpServer())
       .get(`/products?${queryString}`)

@@ -6,8 +6,15 @@ import {
 } from './dto/list-products-query.dto';
 import { CatalogService } from './catalog.service';
 
+type ProductWhere = {
+  status: string;
+  categoryId?: number;
+  name?: { contains: string; mode: string };
+  pricePiasters?: { gte?: number; lte?: number };
+};
+
 type FindManyArgs = {
-  where: { status: string };
+  where: ProductWhere;
   orderBy: { id: string }[];
   skip: number;
   take: number;
@@ -55,6 +62,36 @@ describe('CatalogService', () => {
       }),
     );
     expect(count).toHaveBeenCalledWith({ where: { status: 'ACTIVE' } });
+  });
+
+  it('narrows by category, search, and price range on top of the active filter', async () => {
+    await service.listActiveProducts(
+      query({
+        categoryId: 7,
+        search: 'notebook',
+        minPrice: 100,
+        maxPrice: 900,
+      }),
+    );
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          status: 'ACTIVE',
+          categoryId: 7,
+          name: { contains: 'notebook', mode: 'insensitive' },
+          pricePiasters: { gte: 100, lte: 900 },
+        },
+      }),
+    );
+  });
+
+  it('keeps one-sided price filters partial', async () => {
+    await service.listActiveProducts(query({ minPrice: 250 }));
+
+    const lastArgs = capturedFindManyArgs.at(-1);
+    if (!lastArgs) throw new Error('findMany was not called');
+    expect(lastArgs.where.pricePiasters).toEqual({ gte: 250 });
   });
 
   it('returns the items with the exact query values and page math', async () => {

@@ -34,7 +34,7 @@ export class CatalogService {
   constructor(private readonly prisma: PrismaService) {}
 
   async listActiveProducts(query: ListProductsQueryDto) {
-    const where = { status: 'ACTIVE' as const };
+    const where = this.buildWhere(query);
 
     const [items, total] = await Promise.all([
       this.prisma.product.findMany({
@@ -56,5 +56,27 @@ export class CatalogService {
         totalPages: Math.ceil(total / query.limit),
       },
     };
+  }
+
+  /** The public catalog always filters to active products, then narrows further. */
+  private buildWhere(query: ListProductsQueryDto): Prisma.ProductWhereInput {
+    const where: Prisma.ProductWhereInput = { status: 'ACTIVE' };
+
+    if (query.categoryId !== undefined) {
+      where.categoryId = query.categoryId;
+    }
+
+    if (query.search) {
+      where.name = { contains: query.search, mode: 'insensitive' };
+    }
+
+    if (query.minPrice !== undefined || query.maxPrice !== undefined) {
+      where.pricePiasters = {
+        ...(query.minPrice !== undefined && { gte: query.minPrice }),
+        ...(query.maxPrice !== undefined && { lte: query.maxPrice }),
+      };
+    }
+
+    return where;
   }
 }
