@@ -23,8 +23,51 @@ npm run migrate    # apply database migrations
 npm run start:dev
 ```
 
-The API runs at `http://localhost:3000`.
+The API runs at `http://localhost:3000`, with Swagger UI at `http://localhost:3000/api`.
 The database defaults live in `.env.example`; copy it to `.env` and adjust if your setup differs.
+
+## API
+
+Prices are integers in piasters: `1500` means 15.00 EGP (`1 EGP = 100`).
+
+| Endpoint | Description |
+| --- | --- |
+| `GET /products` | List active products with pagination, sorting, and filters |
+| `GET /products/:id` | Get the details of an active product |
+
+`GET /products` accepts optional query parameters:
+
+| Parameter | Rules | Default |
+| --- | --- | --- |
+| `page` | integer ≥ 1 | `1` |
+| `limit` | integer 1–100 | `10` |
+| `sort` | `newest`, `price_asc`, `price_desc`, `name_asc`, `name_desc` | `newest` |
+| `categoryId` | integer ≥ 1 | — |
+| `search` | case-insensitive name match | — |
+| `minPrice` / `maxPrice` | integer ≥ 0, in piasters (`minPrice ≤ maxPrice`) | — |
+
+Example: `GET /products?categoryId=2&search=notebook&sort=price_asc&minPrice=100&maxPrice=5000`
+
+Responses look like:
+
+```json
+{
+  "items": [
+    {
+      "id": 1,
+      "name": "Alpha Notebook",
+      "description": null,
+      "pricePiasters": 1500,
+      "stock": 12,
+      "category": { "id": 2, "name": "Books" },
+      "createdAt": "2026-10-16T10:00:00.000Z"
+    }
+  ],
+  "meta": { "page": 1, "limit": 10, "total": 42, "totalPages": 5 }
+}
+```
+
+Invalid query parameters get a `400 Bad Request`. A missing or inactive product id gets a `404 Not Found`.
 
 ## Scripts
 
@@ -45,4 +88,4 @@ The database defaults live in `.env.example`; copy it to `.env` and adjust if yo
 
 ## Status
 
-Work in progress. Features are added one at a time, each one tested before moving to the next. Currently at the database foundation stage.
+Work in progress. Features are added one at a time, each one tested before moving to the next. Currently implemented: the database foundation and the public product catalog (list, details, pagination, filters, Swagger).
