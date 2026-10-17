@@ -100,6 +100,21 @@ Catalog management is admin-only: every `/admin/*` endpoint requires an admin Be
 
 Errors: `400` invalid payload (unknown `categoryId`, empty patch), `404` missing product/category, `409` duplicate category name or deleting a category that still has linked products. Categories are protected by a database constraint: they can be deactivated while products reference them, but never deleted.
 
+Product `stock` is intentionally absent from `PATCH /admin/products/:id`: all stock changes go through the inventory endpoints below, and every change is written to a stock-movement ledger.
+
+## Admin Inventory
+
+Stock changes are admin-only and traceable. Every adjustment is recorded as a movement (delta, reason, note, actor, time), and the ledger is the only way stock ever changes — including the initial stock recorded when a product is created.
+
+| Endpoint | Description |
+| --- | --- |
+| `POST /admin/products/:id/stock` | Apply a relative stock change (`delta`, a non-zero integer) and record a movement |
+| `GET /admin/products/:id/movements` | List a product's movements, newest first, paginated (`page`, `limit` up to 100) |
+
+Adjustment payload: `delta` (required, non-zero integer), `reason` (`ADJUSTMENT` or `RESTOCK`; `SALE`/`CANCELLATION` are reserved for the future checkout flow), and an optional `note`. The stock check is atomic, so concurrent adjustments can never drive stock negative: a request that would goes through is `201` with the resulting `stockAfter`, one that would not is `409`.
+
+Errors: `400` invalid payload, `404` missing product, `409` insufficient stock.
+
 ## Environment
 
 `JWT_SECRET` signs the access tokens: generate one with `openssl rand -hex 32` and put it in `.env` (see `.env.example`).
@@ -123,4 +138,4 @@ Errors: `400` invalid payload (unknown `categoryId`, empty patch), `404` missing
 
 ## Status
 
-Work in progress. Features are added one at a time, each one tested before moving to the next. Currently implemented: the database foundation, the public product catalog (list, details, pagination, filters, Swagger), authentication (register, login, JWT guard, admin guard), and admin catalog management (products and categories).
+Work in progress. Features are added one at a time, each one tested before moving to the next. Currently implemented: the database foundation, the public product catalog (list, details, pagination, filters, Swagger), authentication (register, login, JWT guard, admin guard), admin catalog management (products and categories), and the inventory ledger (atomic stock adjustments with a full movement history).
