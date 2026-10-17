@@ -2,6 +2,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { PrismaService } from '../prisma/prisma.service';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
+import { ListMovementsQueryDto } from './dto/list-movements-query.dto';
 import { InventoryService } from './inventory.service';
 
 type UpdateManyArgs = {
@@ -17,6 +18,13 @@ type MovementCreateArgs = {
     note: string | null;
     createdById: number | null;
   };
+};
+
+type MovementFindManyArgs = {
+  where: { productId: number };
+  orderBy: { createdAt: string; id: string }[];
+  skip: number;
+  take: number;
 };
 
 const movementRecord = {
@@ -37,6 +45,14 @@ describe('InventoryService', () => {
   let findUniqueResult: { stock: number } | null;
   let movementCreate: jest.Mock;
   let capturedMovementArgs: MovementCreateArgs[];
+  let productFindUnique: jest.Mock;
+  let productFindUniqueResult: { id: number } | null;
+  let movementFindMany: jest.Mock;
+  let capturedMovementFindManyArgs: MovementFindManyArgs[];
+  let movementFindManyResult: (typeof movementRecord & {
+    createdBy: null;
+  })[] = [];
+  let movementCount: jest.Mock;
 
   beforeEach(async () => {
     capturedUpdateManyArgs = [];
@@ -52,12 +68,23 @@ describe('InventoryService', () => {
       capturedMovementArgs.push(args);
       return Promise.resolve(movementRecord);
     });
+    productFindUniqueResult = { id: 3 };
+    productFindUnique = jest.fn(() => Promise.resolve(productFindUniqueResult));
+    capturedMovementFindManyArgs = [];
+    movementFindManyResult = [];
+    movementFindMany = jest.fn((args: MovementFindManyArgs) => {
+      capturedMovementFindManyArgs.push(args);
+      return Promise.resolve(movementFindManyResult);
+    });
+    movementCount = jest.fn().mockResolvedValue(0);
 
     const tx = {
       product: { updateMany, findUnique },
       inventoryMovement: { create: movementCreate },
     };
     const prismaMock = {
+      product: { findUnique: productFindUnique },
+      inventoryMovement: { findMany: movementFindMany, count: movementCount },
       $transaction: jest.fn((fn: (client: typeof tx) => Promise<unknown>) =>
         fn(tx),
       ),
@@ -140,6 +167,59 @@ describe('InventoryService', () => {
         'Product 77 was not found',
       );
       expect(movementCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listProductMovements', () => {
+    const query = (overrides: Partial<ListMovementsQueryDto> = {}) =>
+      Object.assign(new ListMovementsQueryDto(), {
+        page: 1,
+        limit: 10,
+        ...overrides,
+      });
+
+    it('returns a newest-first page with pagination meta', async () => {
+      const items = [{ ...movementRecord, createdBy: null }];
+      movementFindManyResult = items;
+      movementCount.mockResolvedValue(12);
+
+      const result = await service.listProductMovements(
+        3,
+        query({ page: 2, limit: 5 }),
+      );
+
+      expect(result).toEqual({
+        items,
+        meta: { page: 2, limit: 5, total: 12, totalPages: 3 },
+      });
+      expect(capturedMovementFindManyArgs.at(-1)).toMatchObject({
+        where: { productId: 3 },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: 5,
+        take: 5,
+      });
+      expect(movementCount).toHaveBeenCalledWith({
+        where: { productId: 3 },
+      });
+    });
+
+    it('defaults pagination to page 1 and limit 10', async () => {
+      await service.listProductMovements(3, new ListMovementsQueryDto());
+
+      expect(capturedMovementFindManyArgs.at(-1)).toMatchObject({
+        skip: 0,
+        take: 10,
+      });
+    });
+
+    it('rejects a missing product as not found', async () => {
+      productFindUniqueResult = null;
+
+      await expect(service.listProductMovements(77, query())).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(movementFindMany).not.toHaveBeenCalled();
+      expect(movementCount).not.toHaveBeenCalled();
     });
   });
 });

@@ -20,6 +20,24 @@ interface AdjustmentResponse {
   stockAfter: number;
 }
 
+interface MovementListResponse {
+  items: {
+    id: number;
+    productId: number;
+    delta: number;
+    reason: string;
+    note: string | null;
+    createdAt: string;
+    createdBy: { id: number; email: string; fullName: string | null } | null;
+  }[];
+  meta: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
 let userCounter = 0;
 
 describe('Inventory (e2e)', () => {
@@ -216,6 +234,88 @@ describe('Inventory (e2e)', () => {
         .post('/admin/products/abc/stock')
         .set('Authorization', `Bearer ${adminJwt}`)
         .send({ delta: 10 })
+        .expect(400);
+    });
+  });
+
+  describe('GET /admin/products/:id/movements', () => {
+    it('rejects anonymous and customer requests', async () => {
+      const server = app.getHttpServer();
+      await request(server)
+        .get(`/admin/products/${productId}/movements`)
+        .expect(401);
+      await request(server)
+        .get(`/admin/products/${productId}/movements`)
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .expect(403);
+    });
+
+    it('returns an empty page for a product without movements', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/admin/products/${productId}/movements`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(200);
+
+      expect(res.body as MovementListResponse).toEqual({
+        items: [],
+        meta: { page: 1, limit: 10, total: 0, totalPages: 0 },
+      });
+    });
+
+    it('lists movements newest-first with their actors', async () => {
+      const server = app.getHttpServer();
+      await request(server)
+        .post(`/admin/products/${productId}/stock`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({ delta: 10, note: 'First' })
+        .expect(201);
+      await request(server)
+        .post(`/admin/products/${productId}/stock`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({ delta: -3, note: 'Second' })
+        .expect(201);
+
+      const res = await request(server)
+        .get(`/admin/products/${productId}/movements`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(200);
+
+      const body = res.body as MovementListResponse;
+      expect(body.meta).toEqual({
+        page: 1,
+        limit: 10,
+        total: 2,
+        totalPages: 1,
+      });
+      expect(body.items.map((item) => item.note)).toEqual(['Second', 'First']);
+      expect(body.items[0]).toMatchObject({
+        productId,
+        delta: -3,
+        reason: 'ADJUSTMENT',
+        createdBy: { id: adminId },
+      });
+    });
+
+    it('returns 404 for a missing product', async () => {
+      await request(app.getHttpServer())
+        .get('/admin/products/999999/movements')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(404);
+    });
+
+    it('rejects invalid ids and pagination with 400', async () => {
+      const server = app.getHttpServer();
+      await request(server)
+        .get('/admin/products/abc/movements')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(400);
+      await request(server)
+        .get(`/admin/products/${productId}/movements?page=0`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(400);
+      await request(server)
+        .get(`/admin/products/${productId}/movements?limit=101`)
+        .set('Authorization', `Bearer ${adminJwt}`)
         .expect(400);
     });
   });

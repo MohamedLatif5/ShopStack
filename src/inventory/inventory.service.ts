@@ -6,6 +6,7 @@ import {
 import { MovementReason, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
+import { ListMovementsQueryDto } from './dto/list-movements-query.dto';
 
 const MOVEMENT_SELECT = {
   id: true,
@@ -16,6 +17,11 @@ const MOVEMENT_SELECT = {
   createdAt: true,
 } satisfies Prisma.InventoryMovementSelect;
 
+const MOVEMENT_LIST_SELECT = {
+  ...MOVEMENT_SELECT,
+  createdBy: { select: { id: true, email: true, fullName: true } },
+} satisfies Prisma.InventoryMovementSelect;
+
 export interface StockMovement {
   id: number;
   productId: number;
@@ -23,6 +29,26 @@ export interface StockMovement {
   reason: MovementReason;
   note: string | null;
   createdAt: Date;
+}
+
+export interface MovementActor {
+  id: number;
+  email: string;
+  fullName: string | null;
+}
+
+export interface StockMovementWithActor extends StockMovement {
+  createdBy: MovementActor | null;
+}
+
+export interface ListStockMovementsResult {
+  items: StockMovementWithActor[];
+  meta: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
 }
 
 export interface StockAdjustmentResult extends StockMovement {
@@ -81,5 +107,43 @@ export class InventoryService {
 
       return { ...movement, stockAfter: product?.stock ?? 0 };
     });
+  }
+
+  /** Newest-first movement history for one product, paginated. */
+  async listProductMovements(
+    productId: number,
+    query: ListMovementsQueryDto,
+  ): Promise<ListStockMovementsResult> {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { id: true },
+    });
+    if (!product) {
+      throw new NotFoundException(`Product ${productId} was not found`);
+    }
+
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const where = { productId };
+    const [items, total] = await Promise.all([
+      this.prisma.inventoryMovement.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+        select: MOVEMENT_LIST_SELECT,
+      }),
+      this.prisma.inventoryMovement.count({ where }),
+    ]);
+
+    return {
+      items,
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 }
