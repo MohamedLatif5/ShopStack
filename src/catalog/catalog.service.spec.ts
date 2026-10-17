@@ -37,6 +37,11 @@ type CreateArgs = {
   };
 };
 
+type UpdateArgs = {
+  where: { id: number };
+  data: Record<string, unknown>;
+};
+
 describe('CatalogService', () => {
   let service: CatalogService;
   let findMany: jest.Mock;
@@ -47,6 +52,8 @@ describe('CatalogService', () => {
   let findFirstResult: { id: number; name: string; category: null } | null;
   let create: jest.Mock;
   let capturedCreateArgs: CreateArgs[];
+  let update: jest.Mock;
+  let capturedUpdateArgs: UpdateArgs[];
 
   beforeEach(async () => {
     capturedFindManyArgs = [];
@@ -66,12 +73,19 @@ describe('CatalogService', () => {
       capturedCreateArgs.push(args);
       return Promise.resolve({ id: 1, name: 'Alpha Notebook' });
     });
+    capturedUpdateArgs = [];
+    update = jest.fn((args: UpdateArgs) => {
+      capturedUpdateArgs.push(args);
+      return Promise.resolve({ id: 9, name: 'Alpha Notebook' });
+    });
     const module = await Test.createTestingModule({
       providers: [
         CatalogService,
         {
           provide: PrismaService,
-          useValue: { product: { findMany, count, findFirst, create } },
+          useValue: {
+            product: { findMany, count, findFirst, create, update },
+          },
         },
       ],
     }).compile();
@@ -235,6 +249,81 @@ describe('CatalogService', () => {
           stock: 1,
           categoryId: 999,
         }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  describe('updateProduct', () => {
+    it('sends only the provided fields to prisma', async () => {
+      await service.updateProduct(9, { name: 'New Name', stock: 3 });
+
+      expect(capturedUpdateArgs.at(-1)?.where).toEqual({ id: 9 });
+      expect(capturedUpdateArgs.at(-1)?.data).toEqual({
+        name: 'New Name',
+        stock: 3,
+      });
+    });
+
+    it('treats explicit nulls as real values', async () => {
+      await service.updateProduct(9, {
+        description: null,
+        categoryId: null,
+      });
+
+      expect(capturedUpdateArgs.at(-1)?.data).toEqual({
+        description: null,
+        categoryId: null,
+      });
+    });
+
+    it('rejects an empty patch without touching the database', async () => {
+      await expect(service.updateProduct(9, {})).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a piped empty instance where every field is undefined', async () => {
+      await expect(
+        service.updateProduct(9, {
+          name: undefined,
+          description: undefined,
+          pricePiasters: undefined,
+          stock: undefined,
+          status: undefined,
+          categoryId: undefined,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('maps a missing product (P2025) to NotFoundException', async () => {
+      update.mockImplementation(() =>
+        Promise.reject(
+          new Prisma.PrismaClientKnownRequestError(
+            'An operation failed because it depends on one or more records that were required but not found',
+            { code: 'P2025', clientVersion: '6.19.3' },
+          ),
+        ),
+      );
+
+      await expect(
+        service.updateProduct(9, { name: 'Ghost' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('maps a nonexistent category (P2003) to BadRequestException', async () => {
+      update.mockImplementation(() =>
+        Promise.reject(
+          new Prisma.PrismaClientKnownRequestError(
+            'Foreign key constraint failed on the field: `categoryId`',
+            { code: 'P2003', clientVersion: '6.19.3' },
+          ),
+        ),
+      );
+
+      await expect(
+        service.updateProduct(9, { categoryId: 999 }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
   });

@@ -10,6 +10,7 @@ import {
   ListProductsQueryDto,
   ProductSort,
 } from './dto/list-products-query.dto';
+import { UpdateProductDto } from './dto/update-product.dto';
 
 /** Only these fields are ever exposed by the public catalog. */
 const PRODUCT_SELECT = {
@@ -110,6 +111,51 @@ export class CatalogService {
         throw new BadRequestException(
           `Category ${dto.categoryId} does not exist`,
         );
+      }
+      throw error;
+    }
+  }
+
+  /** Admin product update; an empty patch is rejected instead of silently doing nothing. */
+  async updateProduct(
+    id: number,
+    dto: UpdateProductDto,
+  ): Promise<AdminProduct> {
+    /** Piped DTO instances carry every field as an own key (exposeUnsetFields), so
+     *  emptiness means "no field has a defined value". */
+    const provided = Object.entries(dto).filter(
+      ([, value]) => value !== undefined,
+    );
+    if (provided.length === 0) {
+      throw new BadRequestException('At least one field must be provided');
+    }
+
+    const data: Prisma.ProductUncheckedUpdateInput = {};
+    if (dto.name !== undefined) data.name = dto.name;
+    if (dto.description !== undefined) data.description = dto.description;
+    if (dto.pricePiasters !== undefined) {
+      data.pricePiasters = dto.pricePiasters;
+    }
+    if (dto.stock !== undefined) data.stock = dto.stock;
+    if (dto.status !== undefined) data.status = dto.status;
+    if (dto.categoryId !== undefined) data.categoryId = dto.categoryId;
+
+    try {
+      return await this.prisma.product.update({
+        where: { id },
+        data,
+        select: ADMIN_PRODUCT_SELECT,
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2025') {
+          throw new NotFoundException(`Product ${id} was not found`);
+        }
+        if (error.code === 'P2003') {
+          throw new BadRequestException(
+            `Category ${dto.categoryId} does not exist`,
+          );
+        }
       }
       throw error;
     }
