@@ -38,6 +38,7 @@ model User {
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
   inventoryMovements InventoryMovement[]
+  cartItems          CartItem[]
 }
 
 model Category {
@@ -62,6 +63,7 @@ model Product {
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
   movements     InventoryMovement[]
+  cartItems     CartItem[]
 
   @@index([status])
   @@index([categoryId])
@@ -80,4 +82,17 @@ model InventoryMovement {
 
   @@index([productId])
   @@index([createdAt])
+}
+
+model CartItem {
+  id         Int      @id @default(autoincrement())
+  customerId Int
+  productId  Int
+  quantity   Int
+  createdAt  DateTime @default(now())
+  customer   User     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, productId])
+  @@index([customerId])
 }

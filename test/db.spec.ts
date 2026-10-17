@@ -234,4 +234,116 @@ describe('database schema on a fresh test database', () => {
     expect(orphaned).not.toBeNull();
     expect(orphaned?.createdById).toBeNull();
   });
+
+  it('stores a cart item with defaults', async () => {
+    const user = await client.user.create({
+      data: {
+        email: 'cart-owner@example.com',
+        passwordHash: 'not-a-real-hash',
+      },
+    });
+    const product = await client.product.create({
+      data: { name: 'Cart product', pricePiasters: 300, stock: 5 },
+    });
+
+    const item = await client.cartItem.create({
+      data: { customerId: user.id, productId: product.id, quantity: 2 },
+    });
+    expect(item.quantity).toBe(2);
+    expect(item.createdAt).toBeInstanceOf(Date);
+  });
+
+  it('rejects a zero cart quantity', async () => {
+    const user = await client.user.create({
+      data: { email: 'cart-zero@example.com', passwordHash: 'not-a-real-hash' },
+    });
+    const product = await client.product.create({
+      data: { name: 'Zero product', pricePiasters: 300 },
+    });
+
+    await expect(
+      client.cartItem.create({
+        data: { customerId: user.id, productId: product.id, quantity: 0 },
+      }),
+    ).rejects.toThrow(/check/i);
+  });
+
+  it('rejects the same product twice in one cart', async () => {
+    const user = await client.user.create({
+      data: { email: 'cart-dup@example.com', passwordHash: 'not-a-real-hash' },
+    });
+    const product = await client.product.create({
+      data: { name: 'Dup product', pricePiasters: 300 },
+    });
+
+    await client.cartItem.create({
+      data: { customerId: user.id, productId: product.id, quantity: 1 },
+    });
+    await expect(
+      client.cartItem.create({
+        data: { customerId: user.id, productId: product.id, quantity: 1 },
+      }),
+    ).rejects.toThrow(/unique/i);
+  });
+
+  it('allows the same product in different carts', async () => {
+    const userA = await client.user.create({
+      data: { email: 'cart-a@example.com', passwordHash: 'not-a-real-hash' },
+    });
+    const userB = await client.user.create({
+      data: { email: 'cart-b@example.com', passwordHash: 'not-a-real-hash' },
+    });
+    const product = await client.product.create({
+      data: { name: 'Shared product', pricePiasters: 300 },
+    });
+
+    await client.cartItem.create({
+      data: { customerId: userA.id, productId: product.id, quantity: 1 },
+    });
+    await client.cartItem.create({
+      data: { customerId: userB.id, productId: product.id, quantity: 3 },
+    });
+    expect(
+      await client.cartItem.count({
+        where: { customerId: { in: [userA.id, userB.id] } },
+      }),
+    ).toBe(2);
+  });
+
+  it('cascades cart item deletion with the product and the user', async () => {
+    const user = await client.user.create({
+      data: {
+        email: 'cart-cascade@example.com',
+        passwordHash: 'not-a-real-hash',
+      },
+    });
+    const product = await client.product.create({
+      data: { name: 'Cascade cart product', pricePiasters: 300 },
+    });
+    const item = await client.cartItem.create({
+      data: { customerId: user.id, productId: product.id, quantity: 1 },
+    });
+
+    await client.product.delete({ where: { id: product.id } });
+    expect(
+      await client.cartItem.findUnique({ where: { id: item.id } }),
+    ).toBeNull();
+
+    const user2 = await client.user.create({
+      data: {
+        email: 'cart-cascade-2@example.com',
+        passwordHash: 'not-a-real-hash',
+      },
+    });
+    const product2 = await client.product.create({
+      data: { name: 'Cascade cart product 2', pricePiasters: 300 },
+    });
+    const item2 = await client.cartItem.create({
+      data: { customerId: user2.id, productId: product2.id, quantity: 1 },
+    });
+    await client.user.delete({ where: { id: user2.id } });
+    expect(
+      await client.cartItem.findUnique({ where: { id: item2.id } }),
+    ).toBeNull();
+  });
 });
