@@ -340,4 +340,51 @@ describe('Admin catalog (e2e)', () => {
         .expect(400);
     });
   });
+
+  describe('DELETE /admin/products/:id', () => {
+    it('rejects anonymous requests with 401', async () => {
+      await request(app.getHttpServer())
+        .delete('/admin/products/1')
+        .expect(401);
+    });
+
+    it('rejects customer accounts with 403', async () => {
+      await request(app.getHttpServer())
+        .delete('/admin/products/1')
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .expect(403);
+    });
+
+    it('deletes an existing product, which then disappears publicly', async () => {
+      const product = await prisma.product.create({
+        data: { name: 'Doomed', pricePiasters: 100, stock: 1 },
+      });
+
+      await request(app.getHttpServer())
+        .delete(`/admin/products/${product.id}`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(204);
+
+      expect(
+        await prisma.product.findUnique({ where: { id: product.id } }),
+      ).toBeNull();
+      await request(app.getHttpServer())
+        .get(`/products/${product.id}`)
+        .expect(404);
+    });
+
+    it('returns 404 for a missing product', async () => {
+      await request(app.getHttpServer())
+        .delete('/admin/products/999999')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(404);
+    });
+
+    it('rejects invalid ids with 400', async () => {
+      await request(app.getHttpServer())
+        .delete('/admin/products/abc')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(400);
+    });
+  });
 });

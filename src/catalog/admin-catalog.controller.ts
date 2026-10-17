@@ -1,6 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -11,6 +14,7 @@ import {
   ApiBearerAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -61,5 +65,14 @@ export class AdminCatalogController {
     @Body() dto: UpdateProductDto,
   ): Promise<AdminProductResponseDto> {
     return this.catalog.updateProduct(params.id, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete a product (admin only)' })
+  @ApiNoContentResponse({ description: 'The product was deleted' })
+  @ApiNotFoundResponse({ description: 'Product not found' })
+  remove(@Param() params: ProductParamsDto): Promise<void> {
+    return this.catalog.deleteProduct(params.id);
   }
 }

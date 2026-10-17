@@ -161,6 +161,24 @@ export class CatalogService {
     }
   }
 
+  /**
+   * Hard delete. Nothing references products yet; when carts and orders arrive
+   * they will define their own reference policy (restrict or snapshot-based).
+   */
+  async deleteProduct(id: number): Promise<void> {
+    try {
+      await this.prisma.product.delete({ where: { id } });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
+        throw new NotFoundException(`Product ${id} was not found`);
+      }
+      throw error;
+    }
+  }
+
   /** Public details are only served for active products; everything else is a 404. */
   async getActiveProduct(id: number) {
     const product = await this.prisma.product.findFirst({

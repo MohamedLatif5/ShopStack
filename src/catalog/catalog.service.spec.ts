@@ -54,6 +54,7 @@ describe('CatalogService', () => {
   let capturedCreateArgs: CreateArgs[];
   let update: jest.Mock;
   let capturedUpdateArgs: UpdateArgs[];
+  let remove: jest.Mock;
 
   beforeEach(async () => {
     capturedFindManyArgs = [];
@@ -78,13 +79,21 @@ describe('CatalogService', () => {
       capturedUpdateArgs.push(args);
       return Promise.resolve({ id: 9, name: 'Alpha Notebook' });
     });
+    remove = jest.fn().mockResolvedValue(undefined);
     const module = await Test.createTestingModule({
       providers: [
         CatalogService,
         {
           provide: PrismaService,
           useValue: {
-            product: { findMany, count, findFirst, create, update },
+            product: {
+              findMany,
+              count,
+              findFirst,
+              create,
+              update,
+              delete: remove,
+            },
           },
         },
       ],
@@ -325,6 +334,29 @@ describe('CatalogService', () => {
       await expect(
         service.updateProduct(9, { categoryId: 999 }),
       ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  describe('deleteProduct', () => {
+    it('deletes by id', async () => {
+      await service.deleteProduct(9);
+
+      expect(remove).toHaveBeenCalledWith({ where: { id: 9 } });
+    });
+
+    it('maps a missing product (P2025) to NotFoundException', async () => {
+      remove.mockImplementation(() =>
+        Promise.reject(
+          new Prisma.PrismaClientKnownRequestError(
+            'An operation failed because it depends on one or more records that were required but not found',
+            { code: 'P2025', clientVersion: '6.19.3' },
+          ),
+        ),
+      );
+
+      await expect(service.deleteProduct(9)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
     });
   });
 
