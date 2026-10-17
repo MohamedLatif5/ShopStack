@@ -97,6 +97,37 @@ Carts are server-side and exist only for authenticated customers (there are no g
 
 Quantities must be positive integers and cannot exceed the product's current stock — at add time and at update time (`409` otherwise). Adding an inactive or missing product gets a `404`. A customer can only see and change their own items: another customer's item id behaves exactly like a missing one.
 
+## Checkout
+
+`POST /checkout` turns the current cart into a cash-on-delivery order (requires a customer Bearer token). Payment is collected on delivery — there are no online payments, no shipping fee, and the order total is simply the sum of the items.
+
+The server does all the math and never trusts the cart for prices:
+
+- The total is calculated from the live product prices at checkout time.
+- Each ordered item is stored as a snapshot (name + unit price), so later price edits or product deletion never change past orders.
+- Stock is deducted with a conditional atomic update inside one transaction, so two concurrent checkouts can never oversell the last unit — one succeeds, the other gets a `409`.
+- A successful checkout writes a `SALE` movement per item to the inventory ledger and empties the cart.
+
+The order is created with status `PENDING` and the shipping details from the payload: `fullName`, `phone`, and `address` (all validated; `400` otherwise).
+
+Errors: `400` invalid shipping details or an empty cart, `409` a cart product is inactive or out of stock. A failed checkout changes nothing: stock, cart, and ledger stay exactly as they were.
+
+```json
+{
+  "id": 1,
+  "status": "PENDING",
+  "totalPiasters": 3300,
+  "shippingName": "Sara Ali",
+  "shippingPhone": "01000000000",
+  "shippingAddress": "12 Talaat Harb St., Downtown, Cairo",
+  "createdAt": "2026-10-17T10:00:00.000Z",
+  "items": [
+    { "id": 1, "productId": 1, "productName": "Alpha Notebook", "unitPricePiasters": 1500, "quantity": 2 },
+    { "id": 2, "productId": 2, "productName": "Beta Pen", "unitPricePiasters": 300, "quantity": 1 }
+  ]
+}
+```
+
 ## Admin Catalog
 
 Catalog management is admin-only: every `/admin/*` endpoint requires an admin Bearer token and answers `401` (no/invalid token) or `403` (non-admin account) otherwise.
@@ -151,4 +182,4 @@ Errors: `400` invalid payload, `404` missing product, `409` insufficient stock.
 
 ## Status
 
-Work in progress. Features are added one at a time, each one tested before moving to the next. Currently implemented: the database foundation, the public product catalog (list, details, pagination, filters, Swagger), authentication (register, login, JWT guard, admin guard), admin catalog management (products and categories), the inventory ledger (atomic stock adjustments with a full movement history), and the shopping cart (add, view, update, remove).
+Work in progress. Features are added one at a time, each one tested before moving to the next. Currently implemented: the database foundation, the public product catalog (list, details, pagination, filters, Swagger), authentication (register, login, JWT guard, admin guard), admin catalog management (products and categories), the inventory ledger (atomic stock adjustments with a full movement history), the shopping cart (add, view, update, remove), and cash-on-delivery checkout with price snapshots and concurrency-safe stock.
