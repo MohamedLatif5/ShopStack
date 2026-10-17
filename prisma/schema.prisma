@@ -22,6 +22,15 @@ enum ProductStatus {
   INACTIVE
 }
 
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
 enum MovementReason {
   ADJUSTMENT
   RESTOCK
@@ -39,6 +48,7 @@ model User {
   updatedAt          DateTime           @updatedAt
   inventoryMovements InventoryMovement[]
   cartItems          CartItem[]
+  orders             Order[]
 }
 
 model Category {
@@ -64,6 +74,7 @@ model Product {
   updatedAt     DateTime           @updatedAt
   movements     InventoryMovement[]
   cartItems     CartItem[]
+  orderItems    OrderItem[]
 
   @@index([status])
   @@index([categoryId])
@@ -95,4 +106,36 @@ model CartItem {
 
   @@unique([customerId, productId])
   @@index([customerId])
+}
+
+model Order {
+  id              Int         @id @default(autoincrement())
+  customerId      Int
+  status          OrderStatus @default(PENDING)
+  totalPiasters   Int
+  shippingName    String
+  shippingPhone   String
+  shippingAddress String
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  customer        User        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  items           OrderItem[]
+
+  @@index([customerId])
+}
+
+// Items are snapshots: name and unit price are frozen at purchase time,
+// and the product link is deliberately nullable so deleting a product
+// later never destroys order history (SetNull keeps the snapshot).
+model OrderItem {
+  id                 Int      @id @default(autoincrement())
+  orderId            Int
+  productId          Int?
+  productName        String
+  unitPricePiasters  Int
+  quantity           Int
+  order              Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product            Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
 }

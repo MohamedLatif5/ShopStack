@@ -346,4 +346,181 @@ describe('database schema on a fresh test database', () => {
       await client.cartItem.findUnique({ where: { id: item2.id } }),
     ).toBeNull();
   });
+
+  it('stores an order with defaults and nested items', async () => {
+    const user = await client.user.create({
+      data: {
+        email: 'order-owner@example.com',
+        passwordHash: 'not-a-real-hash',
+      },
+    });
+    const product = await client.product.create({
+      data: { name: 'Ordered Notebook', pricePiasters: 1500, stock: 10 },
+    });
+
+    const order = await client.order.create({
+      data: {
+        customerId: user.id,
+        totalPiasters: 3000,
+        shippingName: 'Sara Ali',
+        shippingPhone: '01000000000',
+        shippingAddress: 'Cairo, Egypt',
+        items: {
+          create: [
+            {
+              productId: product.id,
+              productName: 'Ordered Notebook',
+              unitPricePiasters: 1500,
+              quantity: 2,
+            },
+          ],
+        },
+      },
+      include: { items: true },
+    });
+    expect(order.status).toBe('PENDING');
+    expect(order.createdAt).toBeInstanceOf(Date);
+    expect(order.items).toHaveLength(1);
+    expect(order.items[0]?.productName).toBe('Ordered Notebook');
+  });
+
+  it('rejects a negative order total, negative unit price, and zero quantity', async () => {
+    const user = await client.user.create({
+      data: {
+        email: 'order-checks@example.com',
+        passwordHash: 'not-a-real-hash',
+      },
+    });
+    const base = {
+      shippingName: 'Sara Ali',
+      shippingPhone: '01000000000',
+      shippingAddress: 'Cairo, Egypt',
+    };
+
+    await expect(
+      client.order.create({
+        data: { ...base, customerId: user.id, totalPiasters: -1 },
+      }),
+    ).rejects.toThrow(/check/i);
+
+    const order = await client.order.create({
+      data: { ...base, customerId: user.id, totalPiasters: 0 },
+    });
+    await expect(
+      client.orderItem.create({
+        data: {
+          orderId: order.id,
+          productName: 'Bad item',
+          unitPricePiasters: -5,
+          quantity: 1,
+        },
+      }),
+    ).rejects.toThrow(/check/i);
+    await expect(
+      client.orderItem.create({
+        data: {
+          orderId: order.id,
+          productName: 'Bad item',
+          unitPricePiasters: 100,
+          quantity: 0,
+        },
+      }),
+    ).rejects.toThrow(/check/i);
+  });
+
+  it('cascades order deletion with its items and the user', async () => {
+    const user = await client.user.create({
+      data: {
+        email: 'order-cascade@example.com',
+        passwordHash: 'not-a-real-hash',
+      },
+    });
+    const product = await client.product.create({
+      data: { name: 'Cascade order product', pricePiasters: 500, stock: 5 },
+    });
+    const order = await client.order.create({
+      data: {
+        customerId: user.id,
+        totalPiasters: 500,
+        shippingName: 'Sara Ali',
+        shippingPhone: '01000000000',
+        shippingAddress: 'Cairo, Egypt',
+        items: {
+          create: {
+            productId: product.id,
+            productName: 'Cascade order product',
+            unitPricePiasters: 500,
+            quantity: 1,
+          },
+        },
+      },
+    });
+
+    await client.order.delete({ where: { id: order.id } });
+    expect(await client.orderItem.count({ where: { orderId: order.id } })).toBe(
+      0,
+    );
+
+    const order2 = await client.order.create({
+      data: {
+        customerId: user.id,
+        totalPiasters: 500,
+        shippingName: 'Sara Ali',
+        shippingPhone: '01000000000',
+        shippingAddress: 'Cairo, Egypt',
+        items: {
+          create: {
+            productId: product.id,
+            productName: 'Cascade order product',
+            unitPricePiasters: 500,
+            quantity: 1,
+          },
+        },
+      },
+    });
+    await client.user.delete({ where: { id: user.id } });
+    expect(
+      await client.order.findUnique({ where: { id: order2.id } }),
+    ).toBeNull();
+  });
+
+  it('keeps the order item snapshot when its product is deleted', async () => {
+    const user = await client.user.create({
+      data: {
+        email: 'order-snapshot@example.com',
+        passwordHash: 'not-a-real-hash',
+      },
+    });
+    const product = await client.product.create({
+      data: { name: 'Snapshot Pen', pricePiasters: 250, stock: 5 },
+    });
+    const order = await client.order.create({
+      data: {
+        customerId: user.id,
+        totalPiasters: 250,
+        shippingName: 'Sara Ali',
+        shippingPhone: '01000000000',
+        shippingAddress: 'Cairo, Egypt',
+        items: {
+          create: {
+            productId: product.id,
+            productName: 'Snapshot Pen',
+            unitPricePiasters: 250,
+            quantity: 1,
+          },
+        },
+      },
+      include: { items: true },
+    });
+    const itemId = order.items[0]?.id ?? 0;
+
+    await client.product.delete({ where: { id: product.id } });
+    const orphaned = await client.orderItem.findUnique({
+      where: { id: itemId },
+    });
+    expect(orphaned).not.toBeNull();
+    expect(orphaned?.productId).toBeNull();
+    expect(orphaned?.productName).toBe('Snapshot Pen');
+    expect(orphaned?.unitPricePiasters).toBe(250);
+  });
 });
