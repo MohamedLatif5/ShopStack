@@ -1,4 +1,5 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { Test } from '@nestjs/testing';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -25,6 +26,17 @@ type FindFirstArgs = {
   where: { id: number; status: string };
 };
 
+type CreateArgs = {
+  data: {
+    name: string;
+    description: string | null;
+    pricePiasters: number;
+    stock: number;
+    status: string;
+    categoryId: number | null;
+  };
+};
+
 describe('CatalogService', () => {
   let service: CatalogService;
   let findMany: jest.Mock;
@@ -33,6 +45,8 @@ describe('CatalogService', () => {
   let capturedFindManyArgs: FindManyArgs[];
   let capturedFindFirstArgs: FindFirstArgs[];
   let findFirstResult: { id: number; name: string; category: null } | null;
+  let create: jest.Mock;
+  let capturedCreateArgs: CreateArgs[];
 
   beforeEach(async () => {
     capturedFindManyArgs = [];
@@ -47,12 +61,17 @@ describe('CatalogService', () => {
       capturedFindFirstArgs.push(args);
       return Promise.resolve(findFirstResult);
     });
+    capturedCreateArgs = [];
+    create = jest.fn((args: CreateArgs) => {
+      capturedCreateArgs.push(args);
+      return Promise.resolve({ id: 1, name: 'Alpha Notebook' });
+    });
     const module = await Test.createTestingModule({
       providers: [
         CatalogService,
         {
           provide: PrismaService,
-          useValue: { product: { findMany, count, findFirst } },
+          useValue: { product: { findMany, count, findFirst, create } },
         },
       ],
     }).compile();
@@ -158,6 +177,65 @@ describe('CatalogService', () => {
       await expect(service.getActiveProduct(9)).rejects.toBeInstanceOf(
         NotFoundException,
       );
+    });
+  });
+
+  describe('createProduct', () => {
+    it('creates with defaults: ACTIVE status and no category', async () => {
+      await service.createProduct({
+        name: 'Alpha Notebook',
+        pricePiasters: 1500,
+        stock: 12,
+      });
+
+      expect(capturedCreateArgs.at(-1)?.data).toEqual({
+        name: 'Alpha Notebook',
+        description: null,
+        pricePiasters: 1500,
+        stock: 12,
+        status: 'ACTIVE',
+        categoryId: null,
+      });
+    });
+
+    it('passes explicit description, status, and category through', async () => {
+      await service.createProduct({
+        name: 'Hidden Ink',
+        description: 'Dark ink',
+        pricePiasters: 100,
+        stock: 3,
+        status: 'INACTIVE',
+        categoryId: 7,
+      });
+
+      expect(capturedCreateArgs.at(-1)?.data).toEqual({
+        name: 'Hidden Ink',
+        description: 'Dark ink',
+        pricePiasters: 100,
+        stock: 3,
+        status: 'INACTIVE',
+        categoryId: 7,
+      });
+    });
+
+    it('rejects a nonexistent category as 400, not a 500', async () => {
+      create.mockImplementation(() =>
+        Promise.reject(
+          new Prisma.PrismaClientKnownRequestError(
+            'Foreign key constraint failed on the field: `categoryId`',
+            { code: 'P2003', clientVersion: '6.19.3' },
+          ),
+        ),
+      );
+
+      await expect(
+        service.createProduct({
+          name: 'Orphan Product',
+          pricePiasters: 500,
+          stock: 1,
+          categoryId: 999,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 

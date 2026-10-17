@@ -1,6 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma, ProductStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CreateProductDto } from './dto/create-product.dto';
 import {
   ListProductsQueryDto,
   ProductSort,
@@ -16,6 +21,31 @@ const PRODUCT_SELECT = {
   createdAt: true,
   category: { select: { id: true, name: true } },
 } satisfies Prisma.ProductSelect;
+
+/** Admin view: the public selection plus status and updatedAt. */
+const ADMIN_PRODUCT_SELECT = {
+  id: true,
+  name: true,
+  description: true,
+  pricePiasters: true,
+  stock: true,
+  status: true,
+  createdAt: true,
+  updatedAt: true,
+  category: { select: { id: true, name: true } },
+} satisfies Prisma.ProductSelect;
+
+export interface AdminProduct {
+  id: number;
+  name: string;
+  description: string | null;
+  pricePiasters: number;
+  stock: number;
+  status: ProductStatus;
+  createdAt: Date;
+  updatedAt: Date;
+  category: { id: number; name: string } | null;
+}
 
 /** Stable ordering: every sort ends with the id tiebreaker. */
 const SORT_ORDER: Record<
@@ -56,6 +86,33 @@ export class CatalogService {
         totalPages: Math.ceil(total / query.limit),
       },
     };
+  }
+
+  /** Admin product creation; a missing category id is an invalid relation, not a 500. */
+  async createProduct(dto: CreateProductDto): Promise<AdminProduct> {
+    try {
+      return await this.prisma.product.create({
+        data: {
+          name: dto.name,
+          description: dto.description ?? null,
+          pricePiasters: dto.pricePiasters,
+          stock: dto.stock,
+          status: dto.status ?? ProductStatus.ACTIVE,
+          categoryId: dto.categoryId ?? null,
+        },
+        select: ADMIN_PRODUCT_SELECT,
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2003'
+      ) {
+        throw new BadRequestException(
+          `Category ${dto.categoryId} does not exist`,
+        );
+      }
+      throw error;
+    }
   }
 
   /** Public details are only served for active products; everything else is a 404. */
