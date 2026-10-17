@@ -1,6 +1,7 @@
 // ShopStack database schema.
 // Prices are integers in piasters (1 EGP = 100 piasters) to avoid floating-point money.
-// Stock is a non-negative integer on the product; an inventory ledger may come later.
+// Stock is a non-negative integer on the product; every stock change is recorded
+// in the InventoryMovement ledger (Feature 5).
 
 generator client {
   provider = "prisma-client-js"
@@ -21,14 +22,22 @@ enum ProductStatus {
   INACTIVE
 }
 
+enum MovementReason {
+  ADJUSTMENT
+  RESTOCK
+  SALE
+  CANCELLATION
+}
+
 model User {
-  id           Int      @id @default(autoincrement())
-  email        String   @unique
-  passwordHash String
-  fullName     String?
-  role         Role     @default(CUSTOMER)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                 Int                @id @default(autoincrement())
+  email              String             @unique
+  passwordHash       String
+  fullName           String?
+  role               Role               @default(CUSTOMER)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  inventoryMovements InventoryMovement[]
 }
 
 model Category {
@@ -36,23 +45,39 @@ model Category {
   name        String    @unique
   description String?
   isActive    Boolean   @default(true)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   products    Product[]
 }
 
 model Product {
-  id            Int           @id @default(autoincrement())
+  id            Int                @id @default(autoincrement())
   name          String
   description   String?
   pricePiasters Int
-  stock         Int           @default(0)
-  status        ProductStatus  @default(ACTIVE)
+  stock         Int                @default(0)
+  status        ProductStatus      @default(ACTIVE)
   categoryId    Int?
-  category      Category?     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  category      Category?          @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  movements     InventoryMovement[]
 
   @@index([status])
   @@index([categoryId])
+}
+
+model InventoryMovement {
+  id          Int            @id @default(autoincrement())
+  productId   Int
+  delta       Int
+  reason      MovementReason @default(ADJUSTMENT)
+  note        String?
+  createdById Int?
+  createdAt   DateTime       @default(now())
+  product     Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdBy   User?          @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+  @@index([createdAt])
 }

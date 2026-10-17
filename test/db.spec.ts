@@ -169,4 +169,69 @@ describe('database schema on a fresh test database', () => {
     expect(product.status).toBe('ACTIVE');
     expect(product.createdAt).toBeInstanceOf(Date);
   });
+
+  it('records stock movements with their defaults', async () => {
+    const product = await client.product.create({
+      data: { name: 'Ledger product', pricePiasters: 700 },
+    });
+
+    const movement = await client.inventoryMovement.create({
+      data: { productId: product.id, delta: 10 },
+    });
+    expect(movement.reason).toBe('ADJUSTMENT');
+    expect(movement.note).toBeNull();
+    expect(movement.createdById).toBeNull();
+    expect(movement.createdAt).toBeInstanceOf(Date);
+
+    const negative = await client.inventoryMovement.create({
+      data: { productId: product.id, delta: -3, reason: 'SALE' },
+    });
+    expect(negative.delta).toBe(-3);
+  });
+
+  it('rejects a zero-delta stock movement', async () => {
+    const product = await client.product.create({
+      data: { name: 'Zero delta product', pricePiasters: 300 },
+    });
+    await expect(
+      client.inventoryMovement.create({
+        data: { productId: product.id, delta: 0 },
+      }),
+    ).rejects.toThrow(/check/i);
+  });
+
+  it('cascades movement deletion with the product', async () => {
+    const product = await client.product.create({
+      data: { name: 'Cascade product', pricePiasters: 250 },
+    });
+    await client.inventoryMovement.create({
+      data: { productId: product.id, delta: 5 },
+    });
+
+    await client.product.delete({ where: { id: product.id } });
+    const remaining = await client.inventoryMovement.findMany({
+      where: { productId: product.id },
+    });
+    expect(remaining).toHaveLength(0);
+  });
+
+  it('keeps movements but nulls the actor when a user is deleted', async () => {
+    const user = await client.user.create({
+      data: { email: 'actor@example.com', passwordHash: 'not-a-real-hash' },
+    });
+    const product = await client.product.create({
+      data: { name: 'Actor product', pricePiasters: 400 },
+    });
+    const movement = await client.inventoryMovement.create({
+      data: { productId: product.id, delta: 7, createdById: user.id },
+    });
+    expect(movement.createdById).toBe(user.id);
+
+    await client.user.delete({ where: { id: user.id } });
+    const orphaned = await client.inventoryMovement.findUnique({
+      where: { id: movement.id },
+    });
+    expect(orphaned).not.toBeNull();
+    expect(orphaned?.createdById).toBeNull();
+  });
 });
