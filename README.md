@@ -84,6 +84,19 @@ Errors: `400` invalid payload, `409` duplicate email, `401` bad credentials or a
 
 Admin accounts are customers whose `role` is set to `ADMIN` in the database; there is no public admin-promotion endpoint.
 
+## Cart
+
+Carts are server-side and exist only for authenticated customers (there are no guest carts). A cart stores product references and quantities — never prices. What the cart endpoints return is always the live product data, so a price change shows up immediately and the stored cart is never used as a source of truth at checkout.
+
+| Endpoint | Description |
+| --- | --- |
+| `POST /cart/items` | Add a product (`productId`, `quantity`) |
+| `GET /cart` | List the cart items in insertion order |
+| `PATCH /cart/items/:id` | Change an item's quantity |
+| `DELETE /cart/items/:id` | Remove an item |
+
+Quantities must be positive integers and cannot exceed the product's current stock — at add time and at update time (`409` otherwise). Adding an inactive or missing product gets a `404`. A customer can only see and change their own items: another customer's item id behaves exactly like a missing one.
+
 ## Admin Catalog
 
 Catalog management is admin-only: every `/admin/*` endpoint requires an admin Bearer token and answers `401` (no/invalid token) or `403` (non-admin account) otherwise.
@@ -138,4 +151,4 @@ Errors: `400` invalid payload, `404` missing product, `409` insufficient stock.
 
 ## Status
 
-Work in progress. Features are added one at a time, each one tested before moving to the next. Currently implemented: the database foundation, the public product catalog (list, details, pagination, filters, Swagger), authentication (register, login, JWT guard, admin guard), admin catalog management (products and categories), and the inventory ledger (atomic stock adjustments with a full movement history).
+Work in progress. Features are added one at a time, each one tested before moving to the next. Currently implemented: the database foundation, the public product catalog (list, details, pagination, filters, Swagger), authentication (register, login, JWT guard, admin guard), admin catalog management (products and categories), the inventory ledger (atomic stock adjustments with a full movement history), and the shopping cart (add, view, update, remove).
