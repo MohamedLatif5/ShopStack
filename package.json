@@ -1,7 +1,7 @@
 {
   "name": "shopstack",
   "version": "0.0.1",
-  "description": "ShopStack e-commerce backend (NestJS portfolio project)",
+  "description": "ShopStack e-commerce backend",
   "author": "",
   "private": true,
   "license": "UNLICENSED",
