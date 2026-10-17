@@ -22,12 +22,19 @@ describe('CartService', () => {
   let service: CartService;
   let productFindFirst: jest.Mock;
   let itemCreate: jest.Mock;
+  let itemFindMany: jest.Mock;
   const capturedFindFirstArgs: { where?: unknown; select?: unknown }[] = [];
   const capturedCreateArgs: { data?: unknown; select?: unknown }[] = [];
+  const capturedFindManyArgs: {
+    where?: unknown;
+    orderBy?: unknown;
+    select?: unknown;
+  }[] = [];
 
   beforeEach(() => {
     capturedFindFirstArgs.length = 0;
     capturedCreateArgs.length = 0;
+    capturedFindManyArgs.length = 0;
 
     const productFindFirstResult: typeof sampleProduct | null = sampleProduct;
     productFindFirst = jest.fn(
@@ -42,12 +49,47 @@ describe('CartService', () => {
       return Promise.resolve(createdItem);
     });
 
+    const itemFindManyResult: (typeof createdItem)[] = [createdItem];
+    itemFindMany = jest.fn(
+      (args: { where?: unknown; orderBy?: unknown; select?: unknown }) => {
+        capturedFindManyArgs.push(args);
+        return Promise.resolve(itemFindManyResult);
+      },
+    );
+
     const prismaStub = {
       product: { findFirst: productFindFirst },
-      cartItem: { create: itemCreate },
+      cartItem: { create: itemCreate, findMany: itemFindMany },
     } as unknown as PrismaService;
 
     service = new CartService(prismaStub);
+  });
+
+  describe('getCart', () => {
+    it('returns the cart items scoped to the token customer', async () => {
+      const result = await service.getCart(7);
+
+      expect(result).toEqual({ items: [createdItem] });
+      expect(capturedFindManyArgs[0]?.where).toEqual({ customerId: 7 });
+      expect(capturedFindManyArgs[0]?.orderBy).toEqual([
+        { createdAt: 'asc' },
+        { id: 'asc' },
+      ]);
+    });
+
+    it('returns an empty items array for an empty cart', () => {
+      const emptyImpl = jest.fn(
+        (args: { where?: unknown; orderBy?: unknown }) => {
+          capturedFindManyArgs.push(args);
+          return Promise.resolve([]);
+        },
+      );
+      itemFindMany.mockImplementation(emptyImpl);
+
+      return service.getCart(7).then((result) => {
+        expect(result.items).toEqual([]);
+      });
+    });
   });
 
   describe('addItem', () => {

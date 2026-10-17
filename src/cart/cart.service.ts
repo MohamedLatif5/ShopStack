@@ -32,9 +32,26 @@ export interface CartItemRecord {
   product: CartProductBrief;
 }
 
+export interface CartRecord {
+  items: CartItemRecord[];
+}
+
 @Injectable()
 export class CartService {
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Returns the customer's cart with live product data. Prices and stock
+   * are read from the current product rows, never stored in the cart.
+   */
+  async getCart(customerId: number): Promise<CartRecord> {
+    const items = await this.prisma.cartItem.findMany({
+      where: { customerId },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: CART_ITEM_SELECT,
+    });
+    return { items };
+  }
 
   /**
    * Adds a product to the customer's cart. The customer id always comes

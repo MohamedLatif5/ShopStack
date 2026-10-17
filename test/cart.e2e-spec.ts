@@ -188,4 +188,74 @@ describe('Cart (e2e)', () => {
       );
     });
   });
+
+  describe('GET /cart', () => {
+    it('rejects an anonymous request', async () => {
+      const res = await request(app.getHttpServer()).get('/cart');
+      expect(res.status).toBe(401);
+    });
+
+    it('returns an empty items array for a new customer', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/cart')
+        .set('Authorization', `Bearer ${customerJwt}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ items: [] });
+    });
+
+    it('lists added items in insertion order with live product data', async () => {
+      const beta = await prisma.product.create({
+        data: { name: 'Beta Sticker Pack', pricePiasters: 200, stock: 50 },
+      });
+      const server = app.getHttpServer();
+      await request(server)
+        .post('/cart/items')
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .send({ productId: alphaId, quantity: 1 });
+      await request(server)
+        .post('/cart/items')
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .send({ productId: beta.id, quantity: 3 });
+
+      const res = await request(server)
+        .get('/cart')
+        .set('Authorization', `Bearer ${customerJwt}`);
+      expect(res.status).toBe(200);
+      const body = res.body as { items: CartItemResponse[] };
+      expect(Object.keys(body).sort()).toEqual(['items']);
+      expect(body.items.map((item) => item.product.name)).toEqual([
+        'Alpha Notebook',
+        'Beta Sticker Pack',
+      ]);
+      expect(body.items[1]?.quantity).toBe(3);
+
+      // Live data: a price change is reflected in the cart response.
+      await prisma.product.update({
+        where: { id: alphaId },
+        data: { pricePiasters: 1600 },
+      });
+      const resAfter = await request(server)
+        .get('/cart')
+        .set('Authorization', `Bearer ${customerJwt}`);
+      const itemsAfter = (resAfter.body as { items: CartItemResponse[] }).items;
+      expect(itemsAfter[0]?.product.pricePiasters).toBe(1600);
+    });
+
+    it('never shows another customer cart', async () => {
+      await request(app.getHttpServer())
+        .post('/cart/items')
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .send({ productId: alphaId, quantity: 2 });
+
+      const otherEmail = `cart-e2e-other-${++userCounter}@shopstack.dev`;
+      await register(otherEmail);
+      const otherJwt = await login(otherEmail);
+
+      const res = await request(app.getHttpServer())
+        .get('/cart')
+        .set('Authorization', `Bearer ${otherJwt}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ items: [] });
+    });
+  });
 });
