@@ -34,6 +34,7 @@ Prices are integers in piasters: `1500` means 15.00 EGP (`1 EGP = 100`).
 | --- | --- |
 | `GET /products` | List active products with pagination, sorting, and filters |
 | `GET /products/:id` | Get the details of an active product |
+| `GET /categories` | List active categories |
 
 `GET /products` accepts optional query parameters:
 
@@ -83,6 +84,22 @@ Errors: `400` invalid payload, `409` duplicate email, `401` bad credentials or a
 
 Admin accounts are customers whose `role` is set to `ADMIN` in the database; there is no public admin-promotion endpoint.
 
+## Admin Catalog
+
+Catalog management is admin-only: every `/admin/*` endpoint requires an admin Bearer token and answers `401` (no/invalid token) or `403` (non-admin account) otherwise.
+
+| Endpoint | Description |
+| --- | --- |
+| `POST /admin/products` | Create a product |
+| `PATCH /admin/products/:id` | Update provided fields (an empty patch is `400`) |
+| `DELETE /admin/products/:id` | Delete a product |
+| `GET /admin/categories` | List all categories, active and inactive |
+| `POST /admin/categories` | Create a category |
+| `PATCH /admin/categories/:id` | Update provided fields (rename, description, activate/deactivate) |
+| `DELETE /admin/categories/:id` | Delete a category |
+
+Errors: `400` invalid payload (unknown `categoryId`, empty patch), `404` missing product/category, `409` duplicate category name or deleting a category that still has linked products. Categories are protected by a database constraint: they can be deactivated while products reference them, but never deleted.
+
 ## Environment
 
 `JWT_SECRET` signs the access tokens: generate one with `openssl rand -hex 32` and put it in `.env` (see `.env.example`).
@@ -106,4 +123,4 @@ Admin accounts are customers whose `role` is set to `ADMIN` in the database; the
 
 ## Status
 
-Work in progress. Features are added one at a time, each one tested before moving to the next. Currently implemented: the database foundation, the public product catalog (list, details, pagination, filters, Swagger), and authentication (register, login, JWT guard, admin guard).
+Work in progress. Features are added one at a time, each one tested before moving to the next. Currently implemented: the database foundation, the public product catalog (list, details, pagination, filters, Swagger), authentication (register, login, JWT guard, admin guard), and admin catalog management (products and categories).
