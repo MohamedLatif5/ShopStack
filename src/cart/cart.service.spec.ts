@@ -23,6 +23,10 @@ describe('CartService', () => {
   let productFindFirst: jest.Mock;
   let itemCreate: jest.Mock;
   let itemFindMany: jest.Mock;
+  let itemFindFirst: jest.Mock;
+  let itemUpdate: jest.Mock;
+  let itemDeleteMany: jest.Mock;
+  let itemFindFirstResult: { id: number; product: typeof sampleProduct } | null;
   const capturedFindFirstArgs: { where?: unknown; select?: unknown }[] = [];
   const capturedCreateArgs: { data?: unknown; select?: unknown }[] = [];
   const capturedFindManyArgs: {
@@ -30,11 +34,17 @@ describe('CartService', () => {
     orderBy?: unknown;
     select?: unknown;
   }[] = [];
+  const capturedItemFindFirstArgs: { where?: unknown; select?: unknown }[] = [];
+  const capturedUpdateArgs: { where?: unknown; data?: unknown }[] = [];
+  const capturedDeleteManyArgs: { where?: unknown }[] = [];
 
   beforeEach(() => {
     capturedFindFirstArgs.length = 0;
     capturedCreateArgs.length = 0;
     capturedFindManyArgs.length = 0;
+    capturedItemFindFirstArgs.length = 0;
+    capturedUpdateArgs.length = 0;
+    capturedDeleteManyArgs.length = 0;
 
     const productFindFirstResult: typeof sampleProduct | null = sampleProduct;
     productFindFirst = jest.fn(
@@ -57,9 +67,32 @@ describe('CartService', () => {
       },
     );
 
+    itemFindFirstResult = { id: 77, product: sampleProduct };
+    itemFindFirst = jest.fn((args: { where?: unknown; select?: unknown }) => {
+      capturedItemFindFirstArgs.push(args);
+      return Promise.resolve(itemFindFirstResult);
+    });
+
+    itemUpdate = jest.fn((args: { where?: unknown; data?: unknown }) => {
+      capturedUpdateArgs.push(args);
+      return Promise.resolve(createdItem);
+    });
+
+    const deleteManyResult: { count: number } = { count: 1 };
+    itemDeleteMany = jest.fn((args: { where?: unknown }) => {
+      capturedDeleteManyArgs.push(args);
+      return Promise.resolve(deleteManyResult);
+    });
+
     const prismaStub = {
       product: { findFirst: productFindFirst },
-      cartItem: { create: itemCreate, findMany: itemFindMany },
+      cartItem: {
+        create: itemCreate,
+        findMany: itemFindMany,
+        findFirst: itemFindFirst,
+        update: itemUpdate,
+        deleteMany: itemDeleteMany,
+      },
     } as unknown as PrismaService;
 
     service = new CartService(prismaStub);
@@ -149,6 +182,80 @@ describe('CartService', () => {
         service.addItem(7, { productId: 9, quantity: 2 }),
       ).rejects.toThrow(
         new ConflictException('Product is already in your cart'),
+      );
+    });
+  });
+
+  describe('updateItem', () => {
+    it('updates the quantity of an owned item', async () => {
+      const result = await service.updateItem(7, 77, { quantity: 3 });
+
+      expect(result).toEqual(createdItem);
+      expect(capturedItemFindFirstArgs[0]?.where).toEqual({
+        id: 77,
+        customerId: 7,
+      });
+      expect(capturedUpdateArgs[0]?.where).toEqual({ id: 77 });
+      expect(capturedUpdateArgs[0]?.data).toEqual({ quantity: 3 });
+    });
+
+    it('throws NotFound for a foreign or missing item', async () => {
+      itemFindFirstResult = null;
+
+      await expect(service.updateItem(7, 77, { quantity: 3 })).rejects.toThrow(
+        new NotFoundException('Cart item 77 was not found'),
+      );
+      expect(itemUpdate).not.toHaveBeenCalled();
+    });
+
+    it('throws Conflict when the quantity exceeds current stock', async () => {
+      await expect(service.updateItem(7, 77, { quantity: 6 })).rejects.toThrow(
+        new ConflictException(
+          'Insufficient stock: only 5 left of Alpha Notebook',
+        ),
+      );
+      expect(itemUpdate).not.toHaveBeenCalled();
+    });
+
+    it('maps a concurrent delete to NotFound', async () => {
+      itemUpdate.mockImplementation((args: { where?: unknown }) => {
+        capturedUpdateArgs.push(args);
+        return Promise.reject(
+          new Prisma.PrismaClientKnownRequestError(
+            'An operation failed because it depends on one or more records that were required but not found',
+            {
+              code: 'P2025',
+              clientVersion: '6.19.3',
+              meta: { cause: 'Record to update not found.' },
+            },
+          ),
+        );
+      });
+
+      await expect(service.updateItem(7, 77, { quantity: 3 })).rejects.toThrow(
+        new NotFoundException('Cart item 77 was not found'),
+      );
+    });
+  });
+
+  describe('removeItem', () => {
+    it('removes an owned item', async () => {
+      await service.removeItem(7, 77);
+
+      expect(capturedDeleteManyArgs[0]?.where).toEqual({
+        id: 77,
+        customerId: 7,
+      });
+    });
+
+    it('throws NotFound for a foreign or missing item', async () => {
+      itemDeleteMany.mockImplementation((args: { where?: unknown }) => {
+        capturedDeleteManyArgs.push(args);
+        return Promise.resolve({ count: 0 });
+      });
+
+      await expect(service.removeItem(7, 77)).rejects.toThrow(
+        new NotFoundException('Cart item 77 was not found'),
       );
     });
   });

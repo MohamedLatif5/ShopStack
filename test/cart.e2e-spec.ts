@@ -258,4 +258,166 @@ describe('Cart (e2e)', () => {
       expect(res.body).toEqual({ items: [] });
     });
   });
+
+  describe('PATCH /cart/items/:id', () => {
+    it('rejects an anonymous request', async () => {
+      const res = await request(app.getHttpServer())
+        .patch('/cart/items/1')
+        .send({ quantity: 2 });
+      expect(res.status).toBe(401);
+    });
+
+    it('updates the quantity of an owned item', async () => {
+      const added = await request(app.getHttpServer())
+        .post('/cart/items')
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .send({ productId: alphaId, quantity: 1 });
+      const itemId = (added.body as CartItemResponse).id;
+
+      const res = await request(app.getHttpServer())
+        .patch(`/cart/items/${itemId}`)
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .send({ quantity: 4 });
+      expect(res.status).toBe(200);
+      expect((res.body as CartItemResponse).quantity).toBe(4);
+
+      const stored = await prisma.cartItem.findUnique({
+        where: { id: itemId },
+      });
+      expect(stored?.quantity).toBe(4);
+    });
+
+    it('rejects a quantity above current stock', async () => {
+      const added = await request(app.getHttpServer())
+        .post('/cart/items')
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .send({ productId: alphaId, quantity: 1 });
+      const itemId = (added.body as CartItemResponse).id;
+
+      const res = await request(app.getHttpServer())
+        .patch(`/cart/items/${itemId}`)
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .send({ quantity: 6 });
+      expect(res.status).toBe(409);
+      expect((res.body as ErrorResponse).message).toBe(
+        'Insufficient stock: only 5 left of Alpha Notebook',
+      );
+    });
+
+    it('rejects a foreign item as not found', async () => {
+      const added = await request(app.getHttpServer())
+        .post('/cart/items')
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .send({ productId: alphaId, quantity: 1 });
+      const itemId = (added.body as CartItemResponse).id;
+
+      const otherEmail = `cart-e2e-patch-${++userCounter}@shopstack.dev`;
+      await register(otherEmail);
+      const otherJwt = await login(otherEmail);
+
+      const res = await request(app.getHttpServer())
+        .patch(`/cart/items/${itemId}`)
+        .set('Authorization', `Bearer ${otherJwt}`)
+        .send({ quantity: 2 });
+      expect(res.status).toBe(404);
+
+      const stored = await prisma.cartItem.findUnique({
+        where: { id: itemId },
+      });
+      expect(stored?.quantity).toBe(1);
+    });
+
+    it('rejects a missing item', async () => {
+      const res = await request(app.getHttpServer())
+        .patch('/cart/items/999999')
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .send({ quantity: 2 });
+      expect(res.status).toBe(404);
+    });
+
+    it.each([
+      { quantity: 0 },
+      { quantity: -1 },
+      { quantity: 'many' },
+      { quantity: 1.5 },
+      {},
+    ])('rejects an invalid payload %j', async (payload) => {
+      const res = await request(app.getHttpServer())
+        .patch('/cart/items/1')
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .send(payload);
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects an invalid id', async () => {
+      const res = await request(app.getHttpServer())
+        .patch('/cart/items/abc')
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .send({ quantity: 2 });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe('DELETE /cart/items/:id', () => {
+    it('rejects an anonymous request', async () => {
+      const res = await request(app.getHttpServer()).delete('/cart/items/1');
+      expect(res.status).toBe(401);
+    });
+
+    it('removes an owned item and empties the cart', async () => {
+      const added = await request(app.getHttpServer())
+        .post('/cart/items')
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .send({ productId: alphaId, quantity: 2 });
+      const itemId = (added.body as CartItemResponse).id;
+
+      const res = await request(app.getHttpServer())
+        .delete(`/cart/items/${itemId}`)
+        .set('Authorization', `Bearer ${customerJwt}`);
+      expect(res.status).toBe(204);
+      expect(res.body).toEqual({});
+
+      expect(
+        await prisma.cartItem.findUnique({ where: { id: itemId } }),
+      ).toBeNull();
+      const cart = await request(app.getHttpServer())
+        .get('/cart')
+        .set('Authorization', `Bearer ${customerJwt}`);
+      expect(cart.body).toEqual({ items: [] });
+    });
+
+    it('rejects a foreign item as not found', async () => {
+      const added = await request(app.getHttpServer())
+        .post('/cart/items')
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .send({ productId: alphaId, quantity: 1 });
+      const itemId = (added.body as CartItemResponse).id;
+
+      const otherEmail = `cart-e2e-del-${++userCounter}@shopstack.dev`;
+      await register(otherEmail);
+      const otherJwt = await login(otherEmail);
+
+      const res = await request(app.getHttpServer())
+        .delete(`/cart/items/${itemId}`)
+        .set('Authorization', `Bearer ${otherJwt}`);
+      expect(res.status).toBe(404);
+      expect(
+        await prisma.cartItem.findUnique({ where: { id: itemId } }),
+      ).not.toBeNull();
+    });
+
+    it('rejects a missing item', async () => {
+      const res = await request(app.getHttpServer())
+        .delete('/cart/items/999999')
+        .set('Authorization', `Bearer ${customerJwt}`);
+      expect(res.status).toBe(404);
+    });
+
+    it('rejects an invalid id', async () => {
+      const res = await request(app.getHttpServer())
+        .delete('/cart/items/abc')
+        .set('Authorization', `Bearer ${customerJwt}`);
+      expect(res.status).toBe(400);
+    });
+  });
 });

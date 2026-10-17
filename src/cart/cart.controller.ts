@@ -1,9 +1,22 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -12,10 +25,12 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
+import { ProductParamsDto } from '../catalog/dto/product-params.dto';
 import { CartService } from './cart.service';
 import { AddCartItemDto } from './dto/add-cart-item.dto';
 import { CartItemResponseDto } from './dto/cart-item-response.dto';
 import { CartResponseDto } from './dto/cart-response.dto';
+import { UpdateCartItemDto } from './dto/update-cart-item.dto';
 
 @ApiTags('Cart')
 @ApiBearerAuth()
@@ -53,5 +68,35 @@ export class CartController {
     @Req() request: AuthenticatedRequest,
   ): Promise<CartItemResponseDto> {
     return this.cart.addItem(request.user.userId, dto);
+  }
+
+  @Patch('items/:id')
+  @ApiOperation({ summary: 'Update the quantity of a cart item' })
+  @ApiOkResponse({
+    type: CartItemResponseDto,
+    description: 'The updated cart item with live product data',
+  })
+  @ApiBadRequestResponse({ description: 'Invalid id or non-positive quantity' })
+  @ApiNotFoundResponse({ description: 'Cart item not found for this customer' })
+  @ApiConflictResponse({ description: 'Quantity exceeds current stock' })
+  update(
+    @Param() params: ProductParamsDto,
+    @Body() dto: UpdateCartItemDto,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<CartItemResponseDto> {
+    return this.cart.updateItem(request.user.userId, params.id, dto);
+  }
+
+  @Delete('items/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Remove an item from the cart' })
+  @ApiNoContentResponse({ description: 'Item removed' })
+  @ApiBadRequestResponse({ description: 'Invalid id' })
+  @ApiNotFoundResponse({ description: 'Cart item not found for this customer' })
+  remove(
+    @Param() params: ProductParamsDto,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<void> {
+    return this.cart.removeItem(request.user.userId, params.id);
   }
 }
