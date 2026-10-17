@@ -1,4 +1,8 @@
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
@@ -134,6 +138,35 @@ describe('AuthService', () => {
       );
       expect(compareMock).not.toHaveBeenCalled();
       expect(signAsync).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getCurrentUser', () => {
+    const publicUser = {
+      id: 9,
+      email: 'customer@shopstack.dev',
+      fullName: 'E2E Customer',
+      role: 'CUSTOMER' as const,
+    };
+
+    it('returns the public fields of an existing user', async () => {
+      findUnique.mockResolvedValue(publicUser);
+
+      const result = await service.getCurrentUser(9);
+
+      expect(findUnique).toHaveBeenCalledWith({
+        where: { id: 9 },
+        select: { id: true, email: true, fullName: true, role: true },
+      });
+      expect(result).toEqual(publicUser);
+    });
+
+    it('rejects with NotFound when the user does not exist', async () => {
+      findUnique.mockResolvedValue(null);
+
+      await expect(service.getCurrentUser(999)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });

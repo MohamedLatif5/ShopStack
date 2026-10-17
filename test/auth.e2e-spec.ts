@@ -1,4 +1,5 @@
 import { INestApplication } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -212,6 +213,70 @@ describe('Auth (e2e)', () => {
         .expect(400);
 
       expect((res.body as { error: string }).error).toBe('Bad Request');
+    });
+  });
+
+  describe('me', () => {
+    const registerAndLogin = async () => {
+      const registerRes = await registerCustomer().expect(201);
+      const loginRes = await loginCustomer({
+        email: payload.email,
+        password: payload.password,
+      }).expect(200);
+
+      return {
+        id: (registerRes.body as RegisterResponse).id,
+        accessToken: (loginRes.body as LoginResponse).accessToken,
+      };
+    };
+
+    const getMe = (token?: string) => {
+      const req = request(app.getHttpServer()).get('/auth/me');
+      return token ? req.set('Authorization', `Bearer ${token}`) : req;
+    };
+
+    it('returns the current customer for a valid token', async () => {
+      const { id, accessToken } = await registerAndLogin();
+
+      const res = await getMe(accessToken).expect(200);
+      const body = res.body as RegisterResponse;
+
+      expect(body.id).toBe(id);
+      expect(body.email).toBe(payload.email);
+      expect(body.role).toBe('CUSTOMER');
+      expect(Object.keys(body).sort()).toEqual([
+        'email',
+        'fullName',
+        'id',
+        'role',
+      ]);
+    });
+
+    it('rejects a request without a token', async () => {
+      const res = await getMe().expect(401);
+
+      expect((res.body as { statusCode: number }).statusCode).toBe(401);
+      expect((res.body as { error: string }).error).toBe('Unauthorized');
+    });
+
+    it('rejects a malformed token', async () => {
+      await getMe('not.a.jwt').expect(401);
+    });
+
+    it('rejects a token signed with a different secret', async () => {
+      const { id } = await registerAndLogin();
+      const forged = app
+        .get(JwtService)
+        .sign({ sub: id, role: 'CUSTOMER' }, { secret: 'wrong-secret' });
+
+      await getMe(forged).expect(401);
+    });
+
+    it('rejects a token whose user was deleted', async () => {
+      const { id, accessToken } = await registerAndLogin();
+      await prisma.user.delete({ where: { id } });
+
+      await getMe(accessToken).expect(401);
     });
   });
 });
