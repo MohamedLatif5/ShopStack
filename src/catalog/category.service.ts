@@ -82,6 +82,15 @@ export class CategoryService {
     });
   }
 
+  /** Public listing: active categories only, in a stable order. */
+  listActiveCategories(): Promise<CategoryRecord[]> {
+    return this.prisma.category.findMany({
+      where: { isActive: true },
+      select: CATEGORY_SELECT,
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+    });
+  }
+
   /**
    * Hard delete. Restricted at the database level while products still
    * reference the category (business rule: linked categories cannot be

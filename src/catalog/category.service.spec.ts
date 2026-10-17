@@ -218,6 +218,20 @@ describe('CategoryService', () => {
     });
   });
 
+  describe('listActiveCategories', () => {
+    it('queries only active categories in stable name order', async () => {
+      await expect(service.listActiveCategories()).resolves.toEqual([
+        categoryRecord,
+      ]);
+      expect(capturedFindManyArgs).toHaveLength(1);
+      expect(capturedFindManyArgs[0]?.where).toEqual({ isActive: true });
+      expect(capturedFindManyArgs[0]?.orderBy).toEqual([
+        { name: 'asc' },
+        { id: 'asc' },
+      ]);
+    });
+  });
+
   describe('deleteCategory', () => {
     it('deletes by id', async () => {
       await expect(service.deleteCategory(3)).resolves.toBeUndefined();

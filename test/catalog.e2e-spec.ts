@@ -311,4 +311,44 @@ describe('Catalog (e2e)', () => {
 
     expect(body.error).toBe('Bad Request');
   });
+
+  describe('GET /categories', () => {
+    it('lists active categories in stable name order', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/categories')
+        .expect(200);
+      const body = res.body as {
+        id: number;
+        name: string;
+        description: string | null;
+        isActive: boolean;
+      }[];
+
+      expect(body.map((category) => category.name)).toEqual([
+        'E2E Books',
+        'E2E Games',
+      ]);
+      expect(Object.keys(body[0]).sort()).toEqual([
+        'description',
+        'id',
+        'isActive',
+        'name',
+      ]);
+      expect(body.every((category) => category.isActive)).toBe(true);
+    });
+
+    it('never exposes inactive categories', async () => {
+      await prisma.category.create({
+        data: { name: 'E2E Hidden', isActive: false },
+      });
+
+      const res = await request(app.getHttpServer())
+        .get('/categories')
+        .expect(200);
+
+      expect(
+        (res.body as { name: string }[]).map((category) => category.name),
+      ).not.toContain('E2E Hidden');
+    });
+  });
 });
