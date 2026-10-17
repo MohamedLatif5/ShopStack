@@ -1,6 +1,6 @@
 # ShopStack
 
-A portfolio e-commerce backend: a small online store API with a product catalog, a shopping cart, and Cash-on-Delivery orders.
+A small online store API with a product catalog, a shopping cart, and Cash-on-Delivery orders.
 
 The focus is on backend correctness: server-side validation, authorization, transaction-safe inventory, and tests for the important flows — not on the number of features.
 
