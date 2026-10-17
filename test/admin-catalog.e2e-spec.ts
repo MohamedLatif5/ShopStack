@@ -22,6 +22,13 @@ interface CreatedProduct {
   category: { id: number; name: string } | null;
 }
 
+interface CategoryResponse {
+  id: number;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+}
+
 let userCounter = 0;
 
 describe('Admin catalog (e2e)', () => {
@@ -385,6 +392,207 @@ describe('Admin catalog (e2e)', () => {
         .delete('/admin/products/abc')
         .set('Authorization', `Bearer ${adminJwt}`)
         .expect(400);
+    });
+  });
+
+  describe('POST /admin/categories', () => {
+    it('rejects anonymous and customer requests', async () => {
+      const server = app.getHttpServer();
+      await request(server)
+        .post('/admin/categories')
+        .send({ name: 'Stationery' })
+        .expect(401);
+      await request(server)
+        .post('/admin/categories')
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .send({ name: 'Stationery' })
+        .expect(403);
+    });
+
+    it('creates a category for an admin', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/admin/categories')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({ name: 'Stationery', description: 'Desk things' })
+        .expect(201);
+
+      const body = res.body as CategoryResponse;
+      expect(Object.keys(body).sort()).toEqual([
+        'description',
+        'id',
+        'isActive',
+        'name',
+      ]);
+      expect(body.name).toBe('Stationery');
+      expect(body.description).toBe('Desk things');
+      expect(body.isActive).toBe(true);
+    });
+
+    it('defaults the description to null', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/admin/categories')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({ name: 'Stationery' })
+        .expect(201);
+
+      expect((res.body as CategoryResponse).description).toBeNull();
+    });
+
+    it('rejects a duplicate name with 409', async () => {
+      await request(app.getHttpServer())
+        .post('/admin/categories')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({ name: 'E2E Books' })
+        .expect(409);
+    });
+
+    it('rejects an empty name with 400', async () => {
+      await request(app.getHttpServer())
+        .post('/admin/categories')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({ name: '' })
+        .expect(400);
+    });
+  });
+
+  describe('PATCH /admin/categories/:id', () => {
+    it('rejects anonymous and customer requests', async () => {
+      const server = app.getHttpServer();
+      await request(server)
+        .patch('/admin/categories/1')
+        .send({ name: 'Nope' })
+        .expect(401);
+      await request(server)
+        .patch('/admin/categories/1')
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .send({ name: 'Nope' })
+        .expect(403);
+    });
+
+    it('renames a category', async () => {
+      const category = await prisma.category.create({
+        data: { name: 'Stationery' },
+      });
+
+      const res = await request(app.getHttpServer())
+        .patch(`/admin/categories/${category.id}`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({ name: 'Office' })
+        .expect(200);
+
+      expect((res.body as CategoryResponse).name).toBe('Office');
+      expect(
+        await prisma.category.findUnique({ where: { id: category.id } }),
+      ).toMatchObject({ id: category.id, name: 'Office' });
+    });
+
+    it('deactivates a category', async () => {
+      const category = await prisma.category.create({
+        data: { name: 'Stationery' },
+      });
+
+      const res = await request(app.getHttpServer())
+        .patch(`/admin/categories/${category.id}`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({ isActive: false })
+        .expect(200);
+
+      expect((res.body as CategoryResponse).isActive).toBe(false);
+      expect(
+        await prisma.category.findUnique({ where: { id: category.id } }),
+      ).toMatchObject({ isActive: false });
+    });
+
+    it('clears the description with an explicit null', async () => {
+      const category = await prisma.category.create({
+        data: { name: 'Stationery', description: 'Desk things' },
+      });
+
+      const res = await request(app.getHttpServer())
+        .patch(`/admin/categories/${category.id}`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({ description: null })
+        .expect(200);
+
+      expect((res.body as CategoryResponse).description).toBeNull();
+    });
+
+    it('rejects renaming to an existing name with 409', async () => {
+      const category = await prisma.category.create({
+        data: { name: 'Stationery' },
+      });
+
+      await request(app.getHttpServer())
+        .patch(`/admin/categories/${category.id}`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({ name: 'E2E Books' })
+        .expect(409);
+    });
+
+    it('rejects an empty patch with 400', async () => {
+      const category = await prisma.category.create({
+        data: { name: 'Stationery' },
+      });
+
+      await request(app.getHttpServer())
+        .patch(`/admin/categories/${category.id}`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({})
+        .expect(400);
+    });
+
+    it('returns 404 for a missing category', async () => {
+      await request(app.getHttpServer())
+        .patch('/admin/categories/999999')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({ name: 'Office' })
+        .expect(404);
+    });
+
+    it('rejects invalid ids with 400', async () => {
+      await request(app.getHttpServer())
+        .patch('/admin/categories/abc')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({ name: 'Office' })
+        .expect(400);
+    });
+  });
+
+  describe('GET /admin/categories', () => {
+    it('rejects anonymous and customer requests', async () => {
+      const server = app.getHttpServer();
+      await request(server).get('/admin/categories').expect(401);
+      await request(server)
+        .get('/admin/categories')
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .expect(403);
+    });
+
+    it('lists active and inactive categories in stable order', async () => {
+      await prisma.category.create({ data: { name: 'Gamma' } });
+      await prisma.category.create({ data: { name: 'Alpha' } });
+      await prisma.category.create({
+        data: { name: 'Beta', isActive: false },
+      });
+
+      const res = await request(app.getHttpServer())
+        .get('/admin/categories')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(200);
+
+      const body = res.body as CategoryResponse[];
+      expect(body.map((category) => category.name)).toEqual([
+        'Alpha',
+        'Beta',
+        'E2E Books',
+        'Gamma',
+      ]);
+      expect(body.find((category) => category.name === 'Beta')?.isActive).toBe(
+        false,
+      );
+      expect(
+        body.find((category) => category.name === 'E2E Books')?.isActive,
+      ).toBe(true);
     });
   });
 });
