@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -22,6 +23,7 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { AdminGuard } from '../auth/guards/admin.guard';
+import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { CatalogService } from './catalog.service';
 import { AdminProductResponseDto } from './dto/admin-product-response.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -46,8 +48,11 @@ export class AdminCatalogController {
   @ApiBadRequestResponse({
     description: 'Invalid payload or nonexistent category',
   })
-  create(@Body() dto: CreateProductDto): Promise<AdminProductResponseDto> {
-    return this.catalog.createProduct(dto);
+  create(
+    @Body() dto: CreateProductDto,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<AdminProductResponseDto> {
+    return this.catalog.createProduct(dto, request.user.userId);
   }
 
   @Patch(':id')

@@ -37,6 +37,16 @@ type CreateArgs = {
   };
 };
 
+type MovementCreateArgs = {
+  data: {
+    productId: number;
+    delta: number;
+    reason: string;
+    note: string | null;
+    createdById: number | null;
+  };
+};
+
 type UpdateArgs = {
   where: { id: number };
   data: Record<string, unknown>;
@@ -52,6 +62,8 @@ describe('CatalogService', () => {
   let findFirstResult: { id: number; name: string; category: null } | null;
   let create: jest.Mock;
   let capturedCreateArgs: CreateArgs[];
+  let movementCreate: jest.Mock;
+  let capturedMovementArgs: MovementCreateArgs[];
   let update: jest.Mock;
   let capturedUpdateArgs: UpdateArgs[];
   let remove: jest.Mock;
@@ -80,22 +92,32 @@ describe('CatalogService', () => {
       return Promise.resolve({ id: 9, name: 'Alpha Notebook' });
     });
     remove = jest.fn().mockResolvedValue(undefined);
+    capturedMovementArgs = [];
+    movementCreate = jest.fn((args: MovementCreateArgs) => {
+      capturedMovementArgs.push(args);
+      return Promise.resolve({ id: 1 });
+    });
+    const tx = {
+      product: {
+        findMany,
+        count,
+        findFirst,
+        create,
+        update,
+        delete: remove,
+      },
+      inventoryMovement: { create: movementCreate },
+    };
+    const prismaStub = {
+      ...tx,
+      $transaction: jest.fn((fn: (client: typeof tx) => Promise<unknown>) =>
+        fn(tx),
+      ),
+    };
     const module = await Test.createTestingModule({
       providers: [
         CatalogService,
-        {
-          provide: PrismaService,
-          useValue: {
-            product: {
-              findMany,
-              count,
-              findFirst,
-              create,
-              update,
-              delete: remove,
-            },
-          },
-        },
+        { provide: PrismaService, useValue: prismaStub },
       ],
     }).compile();
     service = module.get(CatalogService);
@@ -205,11 +227,14 @@ describe('CatalogService', () => {
 
   describe('createProduct', () => {
     it('creates with defaults: ACTIVE status and no category', async () => {
-      await service.createProduct({
-        name: 'Alpha Notebook',
-        pricePiasters: 1500,
-        stock: 12,
-      });
+      await service.createProduct(
+        {
+          name: 'Alpha Notebook',
+          pricePiasters: 1500,
+          stock: 12,
+        },
+        7,
+      );
 
       expect(capturedCreateArgs.at(-1)?.data).toEqual({
         name: 'Alpha Notebook',
@@ -221,15 +246,51 @@ describe('CatalogService', () => {
       });
     });
 
-    it('passes explicit description, status, and category through', async () => {
-      await service.createProduct({
-        name: 'Hidden Ink',
-        description: 'Dark ink',
-        pricePiasters: 100,
-        stock: 3,
-        status: 'INACTIVE',
-        categoryId: 7,
+    it('records the initial stock as a RESTOCK movement', async () => {
+      await service.createProduct(
+        {
+          name: 'Alpha Notebook',
+          pricePiasters: 1500,
+          stock: 12,
+        },
+        7,
+      );
+
+      expect(capturedMovementArgs).toHaveLength(1);
+      expect(capturedMovementArgs[0]?.data).toEqual({
+        productId: 1,
+        delta: 12,
+        reason: 'RESTOCK',
+        note: 'Initial stock',
+        createdById: 7,
       });
+    });
+
+    it('writes no movement when the initial stock is zero', async () => {
+      await service.createProduct(
+        {
+          name: 'Alpha Notebook',
+          pricePiasters: 1500,
+          stock: 0,
+        },
+        7,
+      );
+
+      expect(movementCreate).not.toHaveBeenCalled();
+    });
+
+    it('passes explicit description, status, and category through', async () => {
+      await service.createProduct(
+        {
+          name: 'Hidden Ink',
+          description: 'Dark ink',
+          pricePiasters: 100,
+          stock: 3,
+          status: 'INACTIVE',
+          categoryId: 7,
+        },
+        7,
+      );
 
       expect(capturedCreateArgs.at(-1)?.data).toEqual({
         name: 'Hidden Ink',
@@ -252,24 +313,26 @@ describe('CatalogService', () => {
       );
 
       await expect(
-        service.createProduct({
-          name: 'Orphan Product',
-          pricePiasters: 500,
-          stock: 1,
-          categoryId: 999,
-        }),
+        service.createProduct(
+          {
+            name: 'Orphan Product',
+            pricePiasters: 500,
+            stock: 1,
+            categoryId: 999,
+          },
+          7,
+        ),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 
   describe('updateProduct', () => {
     it('sends only the provided fields to prisma', async () => {
-      await service.updateProduct(9, { name: 'New Name', stock: 3 });
+      await service.updateProduct(9, { name: 'New Name' });
 
       expect(capturedUpdateArgs.at(-1)?.where).toEqual({ id: 9 });
       expect(capturedUpdateArgs.at(-1)?.data).toEqual({
         name: 'New Name',
-        stock: 3,
       });
     });
 
@@ -298,7 +361,6 @@ describe('CatalogService', () => {
           name: undefined,
           description: undefined,
           pricePiasters: undefined,
-          stock: undefined,
           status: undefined,
           categoryId: undefined,
         }),

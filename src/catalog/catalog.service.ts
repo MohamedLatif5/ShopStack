@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, ProductStatus } from '@prisma/client';
+import { MovementReason, Prisma, ProductStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import {
@@ -90,18 +90,35 @@ export class CatalogService {
   }
 
   /** Admin product creation; a missing category id is an invalid relation, not a 500. */
-  async createProduct(dto: CreateProductDto): Promise<AdminProduct> {
+  async createProduct(
+    dto: CreateProductDto,
+    actorId: number | null,
+  ): Promise<AdminProduct> {
     try {
-      return await this.prisma.product.create({
-        data: {
-          name: dto.name,
-          description: dto.description ?? null,
-          pricePiasters: dto.pricePiasters,
-          stock: dto.stock,
-          status: dto.status ?? ProductStatus.ACTIVE,
-          categoryId: dto.categoryId ?? null,
-        },
-        select: ADMIN_PRODUCT_SELECT,
+      return await this.prisma.$transaction(async (tx) => {
+        const product = await tx.product.create({
+          data: {
+            name: dto.name,
+            description: dto.description ?? null,
+            pricePiasters: dto.pricePiasters,
+            stock: dto.stock,
+            status: dto.status ?? ProductStatus.ACTIVE,
+            categoryId: dto.categoryId ?? null,
+          },
+          select: ADMIN_PRODUCT_SELECT,
+        });
+        if (dto.stock > 0) {
+          await tx.inventoryMovement.create({
+            data: {
+              productId: product.id,
+              delta: dto.stock,
+              reason: MovementReason.RESTOCK,
+              note: 'Initial stock',
+              createdById: actorId,
+            },
+          });
+        }
+        return product;
       });
     } catch (error) {
       if (
@@ -136,7 +153,6 @@ export class CatalogService {
     if (dto.pricePiasters !== undefined) {
       data.pricePiasters = dto.pricePiasters;
     }
-    if (dto.stock !== undefined) data.stock = dto.stock;
     if (dto.status !== undefined) data.status = dto.status;
     if (dto.categoryId !== undefined) data.categoryId = dto.categoryId;
 

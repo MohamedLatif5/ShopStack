@@ -36,6 +36,7 @@ describe('Admin catalog (e2e)', () => {
   let prisma: PrismaService;
   let booksId: number;
   let adminJwt: string;
+  let adminId: number;
   let customerJwt: string;
 
   const register = (email: string) =>
@@ -54,7 +55,11 @@ describe('Admin catalog (e2e)', () => {
   const makeAdminToken = async () => {
     const email = `admin-e2e-${++userCounter}@shopstack.dev`;
     await register(email);
-    await prisma.user.update({ where: { email }, data: { role: 'ADMIN' } });
+    const user = await prisma.user.update({
+      where: { email },
+      data: { role: 'ADMIN' },
+    });
+    adminId = user.id;
     return login(email);
   };
 
@@ -178,6 +183,25 @@ describe('Admin catalog (e2e)', () => {
         (item) => item.name,
       );
       expect(names).toEqual([]);
+    });
+
+    it('records the initial stock as a movement', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/admin/products')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send(createPayload)
+        .expect(201);
+
+      const productId = (res.body as CreatedProduct).id;
+      const movement = await prisma.inventoryMovement.findFirst({
+        where: { productId },
+      });
+      expect(movement).toMatchObject({
+        delta: 5,
+        reason: 'RESTOCK',
+        note: 'Initial stock',
+        createdById: adminId,
+      });
     });
 
     it('rejects invalid payloads with 400', async () => {
@@ -345,6 +369,25 @@ describe('Admin catalog (e2e)', () => {
         .set('Authorization', `Bearer ${adminJwt}`)
         .send({})
         .expect(400);
+    });
+
+    it('rejects stock updates — stock only changes via the inventory endpoint', async () => {
+      const product = await makeProduct({
+        name: 'Guarded Stock',
+        pricePiasters: 100,
+        stock: 4,
+      });
+
+      await request(app.getHttpServer())
+        .patch(`/admin/products/${product.id}`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({ stock: 99 })
+        .expect(400);
+
+      const stored = await prisma.product.findUnique({
+        where: { id: product.id },
+      });
+      expect(stored?.stock).toBe(4);
     });
   });
 

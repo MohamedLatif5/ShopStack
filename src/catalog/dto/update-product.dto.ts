@@ -36,13 +36,6 @@ export class UpdateProductDto {
   @Min(0)
   pricePiasters?: number;
 
-  @ApiPropertyOptional({ example: 12 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  stock?: number;
-
   @ApiPropertyOptional({ enum: ProductStatus })
   @IsOptional()
   @IsEnum(ProductStatus)
