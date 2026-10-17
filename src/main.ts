@@ -7,8 +7,11 @@ async function bootstrap() {
 
   const config = new DocumentBuilder()
     .setTitle('ShopStack API')
-    .setDescription('ShopStack e-commerce backend — public product catalog')
+    .setDescription(
+      'ShopStack e-commerce backend — public product catalog and authentication',
+    )
     .setVersion('0.1.0')
+    .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);
