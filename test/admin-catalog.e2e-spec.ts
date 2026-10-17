@@ -595,4 +595,70 @@ describe('Admin catalog (e2e)', () => {
       ).toBe(true);
     });
   });
+
+  describe('DELETE /admin/categories/:id', () => {
+    it('rejects anonymous and customer requests', async () => {
+      const server = app.getHttpServer();
+      await request(server).delete('/admin/categories/1').expect(401);
+      await request(server)
+        .delete('/admin/categories/1')
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .expect(403);
+    });
+
+    it('deletes an empty category', async () => {
+      const category = await prisma.category.create({
+        data: { name: 'Doomed' },
+      });
+
+      await request(app.getHttpServer())
+        .delete(`/admin/categories/${category.id}`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(204);
+
+      expect(
+        await prisma.category.findUnique({ where: { id: category.id } }),
+      ).toBeNull();
+    });
+
+    it('refuses to delete a category with linked products', async () => {
+      const category = await prisma.category.create({
+        data: { name: 'Used' },
+      });
+      await prisma.product.create({
+        data: {
+          name: 'Linked product',
+          pricePiasters: 100,
+          stock: 1,
+          categoryId: category.id,
+        },
+      });
+
+      const res = await request(app.getHttpServer())
+        .delete(`/admin/categories/${category.id}`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(409);
+
+      expect((res.body as { message: string }).message).toContain(
+        'linked products',
+      );
+      expect(
+        await prisma.category.findUnique({ where: { id: category.id } }),
+      ).not.toBeNull();
+    });
+
+    it('returns 404 for a missing category', async () => {
+      await request(app.getHttpServer())
+        .delete('/admin/categories/999999')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(404);
+    });
+
+    it('rejects invalid ids with 400', async () => {
+      await request(app.getHttpServer())
+        .delete('/admin/categories/abc')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(400);
+    });
+  });
 });

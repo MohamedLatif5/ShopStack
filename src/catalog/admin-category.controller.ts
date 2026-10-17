@@ -1,7 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -13,6 +16,7 @@ import {
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -72,5 +76,15 @@ export class AdminCategoryController {
     @Body() dto: UpdateCategoryDto,
   ): Promise<CategoryResponseDto> {
     return this.categories.updateCategory(params.id, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete a category (admin only)' })
+  @ApiNoContentResponse({ description: 'The category was deleted' })
+  @ApiConflictResponse({ description: 'Category still has linked products' })
+  @ApiNotFoundResponse({ description: 'Category not found' })
+  remove(@Param() params: CategoryParamsDto): Promise<void> {
+    return this.categories.deleteCategory(params.id);
   }
 }

@@ -82,6 +82,25 @@ export class CategoryService {
     });
   }
 
+  /**
+   * Hard delete. Restricted at the database level while products still
+   * reference the category (business rule: linked categories cannot be
+   * deleted, only deactivated).
+   */
+  async deleteCategory(id: number): Promise<void> {
+    try {
+      await this.prisma.category.delete({ where: { id } });
+    } catch (error) {
+      if (this.isMissing(error)) {
+        throw new NotFoundException(`Category ${id} was not found`);
+      }
+      if (this.isForeignKeyViolation(error)) {
+        throw new ConflictException('Category still has linked products');
+      }
+      throw error;
+    }
+  }
+
   private isUniqueViolation(error: unknown): boolean {
     return (
       error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -93,6 +112,13 @@ export class CategoryService {
     return (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2025'
+    );
+  }
+
+  private isForeignKeyViolation(error: unknown): boolean {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2003'
     );
   }
 }

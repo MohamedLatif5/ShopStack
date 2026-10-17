@@ -36,6 +36,12 @@ const missingRecord = () =>
     { code: 'P2025', clientVersion: '6.19.3' },
   );
 
+const foreignKeyViolation = () =>
+  new Prisma.PrismaClientKnownRequestError(
+    'Foreign key constraint failed on the constraint: `Product_categoryId_fkey`',
+    { code: 'P2003', clientVersion: '6.19.3' },
+  );
+
 describe('CategoryService', () => {
   let service: CategoryService;
   let create: jest.Mock;
@@ -44,6 +50,8 @@ describe('CategoryService', () => {
   let capturedUpdateArgs: UpdateArgs[];
   let findMany: jest.Mock;
   let capturedFindManyArgs: FindManyArgs[];
+  let remove: jest.Mock;
+  let capturedRemoveArgs: { where: { id: number } }[];
 
   const categoryRecord = {
     id: 3,
@@ -68,13 +76,18 @@ describe('CategoryService', () => {
       capturedFindManyArgs.push(args);
       return Promise.resolve([categoryRecord]);
     });
+    capturedRemoveArgs = [];
+    remove = jest.fn((args: { where: { id: number } }) => {
+      capturedRemoveArgs.push(args);
+      return Promise.resolve(categoryRecord);
+    });
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         CategoryService,
         {
           provide: PrismaService,
-          useValue: { category: { create, update, findMany } },
+          useValue: { category: { create, update, findMany, delete: remove } },
         },
       ],
     }).compile();
@@ -202,6 +215,33 @@ describe('CategoryService', () => {
         { name: 'asc' },
         { id: 'asc' },
       ]);
+    });
+  });
+
+  describe('deleteCategory', () => {
+    it('deletes by id', async () => {
+      await expect(service.deleteCategory(3)).resolves.toBeUndefined();
+      expect(capturedRemoveArgs).toEqual([{ where: { id: 3 } }]);
+    });
+
+    it('maps a missing category to not found', async () => {
+      remove.mockRejectedValue(missingRecord());
+      await expect(service.deleteCategory(77)).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(service.deleteCategory(77)).rejects.toThrow(
+        'Category 77 was not found',
+      );
+    });
+
+    it('maps a linked-products violation to a conflict', async () => {
+      remove.mockRejectedValue(foreignKeyViolation());
+      await expect(service.deleteCategory(3)).rejects.toThrow(
+        ConflictException,
+      );
+      await expect(service.deleteCategory(3)).rejects.toThrow(
+        'Category still has linked products',
+      );
     });
   });
 });
