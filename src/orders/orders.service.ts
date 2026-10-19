@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import {
   MovementReason,
@@ -11,6 +12,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CheckoutDto } from './dto/checkout.dto';
+import type { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 
 const ORDER_SELECT = {
   id: true,
@@ -60,6 +62,16 @@ interface CartLine {
     pricePiasters: number;
     stock: number;
     status: ProductStatus;
+  };
+}
+
+export interface ListOrdersResult {
+  items: OrderRecord[];
+  meta: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
   };
 }
 
@@ -158,5 +170,48 @@ export class OrdersService {
 
       return order;
     });
+  }
+
+  /** Lists the authenticated customer's own orders, newest first. */
+  async listMyOrders(
+    customerId: number,
+    query: ListOrdersQueryDto,
+  ): Promise<ListOrdersResult> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const where = { customerId };
+
+    const [items, total] = await Promise.all([
+      this.prisma.order.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+        select: ORDER_SELECT,
+      }),
+      this.prisma.order.count({ where }),
+    ]);
+
+    return {
+      items,
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /** Returns one order, but only when it belongs to this customer. */
+  async getMyOrder(customerId: number, orderId: number): Promise<OrderRecord> {
+    const order = await this.prisma.order.findFirst({
+      where: { id: orderId, customerId },
+      select: ORDER_SELECT,
+    });
+    if (!order) {
+      throw new NotFoundException(`Order ${orderId} was not found`);
+    }
+    return order;
   }
 }
