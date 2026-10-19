@@ -371,4 +371,103 @@ describe('Customer order history (e2e)', () => {
         .expect(400);
     });
   });
+
+  describe('admin order status updates', () => {
+    const patchStatus = (
+      jwt: string,
+      orderId: number | string,
+      status: string,
+    ) =>
+      request(app.getHttpServer())
+        .patch(`/admin/orders/${orderId}`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({ status });
+
+    it('rejects anonymous and non-admin requests', async () => {
+      const adminJwt = await makeAdmin();
+      await patchStatus('no-token', firstOrderId, 'CONFIRMED').expect(401);
+      await patchStatus(customerJwt, firstOrderId, 'CONFIRMED').expect(403);
+      await patchStatus(adminJwt, firstOrderId, 'CONFIRMED').expect(200);
+    });
+
+    it('moves an order along the approved chain without touching stock', async () => {
+      const adminJwt = await makeAdmin();
+      const res = await patchStatus(
+        adminJwt,
+        secondOrderId,
+        'CONFIRMED',
+      ).expect(200);
+      expect((res.body as OrderResponse).status).toBe('CONFIRMED');
+      await patchStatus(adminJwt, secondOrderId, 'PROCESSING').expect(200);
+      await patchStatus(adminJwt, secondOrderId, 'SHIPPED').expect(200);
+      const res4 = await patchStatus(
+        adminJwt,
+        secondOrderId,
+        'DELIVERED',
+      ).expect(200);
+      expect((res4.body as OrderResponse).status).toBe('DELIVERED');
+
+      const order = await prisma.order.findUnique({
+        where: { id: secondOrderId },
+      });
+      expect(order?.status).toBe('DELIVERED');
+      const product = await prisma.product.findUnique({
+        where: { id: productId },
+      });
+      expect(product?.stock).toBe(47);
+    });
+
+    it('rejects a transition outside the matrix', async () => {
+      const adminJwt = await makeAdmin();
+      const res = await patchStatus(adminJwt, firstOrderId, 'DELIVERED').expect(
+        409,
+      );
+      expect((res.body as ErrorResponse).error).toBe('Conflict');
+
+      const order = await prisma.order.findUnique({
+        where: { id: firstOrderId },
+      });
+      expect(order?.status).toBe('PENDING');
+    });
+
+    it('cancelling restocks the deducted items exactly once', async () => {
+      const adminJwt = await makeAdmin();
+      const res = await patchStatus(adminJwt, firstOrderId, 'CANCELLED').expect(
+        200,
+      );
+      expect((res.body as OrderResponse).status).toBe('CANCELLED');
+
+      const product = await prisma.product.findUnique({
+        where: { id: productId },
+      });
+      expect(product?.stock).toBe(48);
+      const movements = await prisma.inventoryMovement.findMany({
+        where: { note: `Order #${firstOrderId}`, reason: 'CANCELLATION' },
+      });
+      expect(movements).toHaveLength(1);
+      expect(movements[0]).toMatchObject({
+        productId,
+        delta: 1,
+        reason: 'CANCELLATION',
+      });
+
+      // CANCELLED is terminal: a second cancel attempt restores nothing.
+      await patchStatus(adminJwt, firstOrderId, 'CANCELLED').expect(409);
+      const productAfter = await prisma.product.findUnique({
+        where: { id: productId },
+      });
+      expect(productAfter?.stock).toBe(48);
+      const movementsAfter = await prisma.inventoryMovement.findMany({
+        where: { note: `Order #${firstOrderId}`, reason: 'CANCELLATION' },
+      });
+      expect(movementsAfter).toHaveLength(1);
+    });
+
+    it('returns 404 for a missing order and 400 for bad input', async () => {
+      const adminJwt = await makeAdmin();
+      await patchStatus(adminJwt, 999999, 'CONFIRMED').expect(404);
+      await patchStatus(adminJwt, 'abc', 'CONFIRMED').expect(400);
+      await patchStatus(adminJwt, firstOrderId, 'BOGUS').expect(400);
+    });
+  });
 });

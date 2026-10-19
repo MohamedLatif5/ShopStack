@@ -80,6 +80,8 @@ describe('OrdersService', () => {
   let orderCountResult = 0;
   let orderFindFirstResult: OrderRecord | null = createdOrder;
   let orderFindUniqueResult: AdminOrderRecord | null = adminOrder;
+  let txOrderFindUniqueResult: AdminOrderRecord | null = adminOrder;
+  let orderUpdateResult: AdminOrderRecord = adminOrder;
 
   let orderCreateCalls = 0;
   let movementCreateCalls = 0;
@@ -93,6 +95,32 @@ describe('OrdersService', () => {
   const capturedOrderCountArgs: Array<{ where?: unknown }> = [];
   const capturedOrderFindFirstArgs: Array<{ where?: unknown }> = [];
   const capturedOrderFindUniqueArgs: Array<{ where?: unknown }> = [];
+  const capturedTxOrderFindUniqueArgs: Array<{ where?: unknown }> = [];
+  const capturedOrderUpdateArgs: Array<{ data: Record<string, unknown> }> = [];
+  const capturedRestockArgs: Array<{
+    where: { id: number };
+    data: { stock: { increment: number } };
+  }> = [];
+
+  const cancellableOrder = {
+    ...adminOrder,
+    items: [
+      {
+        id: 1,
+        productId: 10,
+        productName: 'Alpha Notebook',
+        unitPricePiasters: 1500,
+        quantity: 2,
+      },
+      {
+        id: 2,
+        productId: null,
+        productName: 'Deleted Pen',
+        unitPricePiasters: 300,
+        quantity: 1,
+      },
+    ],
+  };
 
   beforeEach(() => {
     capturedUpdateManyArgs.length = 0;
@@ -103,12 +131,17 @@ describe('OrdersService', () => {
     capturedOrderCountArgs.length = 0;
     capturedOrderFindFirstArgs.length = 0;
     capturedOrderFindUniqueArgs.length = 0;
+    capturedTxOrderFindUniqueArgs.length = 0;
+    capturedOrderUpdateArgs.length = 0;
+    capturedRestockArgs.length = 0;
     cartLinesResult = [alphaLine, betaLine];
     updateManyResult = { count: 1 };
     orderFindManyResult = [adminOrder];
     orderCountResult = 12;
     orderFindFirstResult = createdOrder;
     orderFindUniqueResult = adminOrder;
+    txOrderFindUniqueResult = adminOrder;
+    orderUpdateResult = adminOrder;
     orderCreateCalls = 0;
     movementCreateCalls = 0;
 
@@ -130,12 +163,29 @@ describe('OrdersService', () => {
             return Promise.resolve(updateManyResult);
           },
         ),
+        update: jest.fn(
+          (args: {
+            where: { id: number };
+            data: { stock: { increment: number } };
+          }) => {
+            capturedRestockArgs.push(args);
+            return Promise.resolve({});
+          },
+        ),
       },
       order: {
         create: jest.fn((args: { data: Record<string, unknown> }) => {
           orderCreateCalls += 1;
           capturedOrderCreateArgs.push(args);
           return Promise.resolve(createdOrder);
+        }),
+        findUnique: jest.fn((args: { where?: unknown }) => {
+          capturedTxOrderFindUniqueArgs.push(args);
+          return Promise.resolve(txOrderFindUniqueResult);
+        }),
+        update: jest.fn((args: { data: Record<string, unknown> }) => {
+          capturedOrderUpdateArgs.push(args);
+          return Promise.resolve(orderUpdateResult);
         }),
       },
       inventoryMovement: {
@@ -408,6 +458,75 @@ describe('OrdersService', () => {
       await expect(service.getOrder(999)).rejects.toThrow(
         new NotFoundException('Order 999 was not found'),
       );
+    });
+  });
+
+  describe('updateOrderStatus (admin)', () => {
+    it('moves an order along an approved transition without touching stock', async () => {
+      const result = await service.updateOrderStatus(
+        77,
+        { status: 'CONFIRMED' },
+        5,
+      );
+
+      expect(result).toBe(adminOrder);
+      expect(capturedOrderUpdateArgs[0]?.data).toEqual({ status: 'CONFIRMED' });
+      expect(capturedRestockArgs).toHaveLength(0);
+      expect(movementCreateCalls).toBe(0);
+    });
+
+    it('cancelling restocks existing products and writes CANCELLATION movements', async () => {
+      txOrderFindUniqueResult = cancellableOrder;
+
+      await service.updateOrderStatus(77, { status: 'CANCELLED' }, 5);
+
+      expect(capturedRestockArgs).toEqual([
+        { where: { id: 10 }, data: { stock: { increment: 2 } } },
+      ]);
+      expect(movementCreateCalls).toBe(1);
+      expect(capturedMovementArgs[0]?.data).toEqual({
+        productId: 10,
+        delta: 2,
+        reason: 'CANCELLATION',
+        note: 'Order #77',
+        createdById: 5,
+      });
+      expect(capturedOrderUpdateArgs[0]?.data).toEqual({ status: 'CANCELLED' });
+    });
+
+    it('rejects a transition outside the matrix', async () => {
+      await expect(
+        service.updateOrderStatus(77, { status: 'SHIPPED' }, 5),
+      ).rejects.toThrow(
+        new ConflictException(
+          'Cannot change order status from PENDING to SHIPPED',
+        ),
+      );
+      expect(capturedOrderUpdateArgs).toHaveLength(0);
+      expect(capturedRestockArgs).toHaveLength(0);
+    });
+
+    it('rejects transitions out of terminal states — no double restock', async () => {
+      txOrderFindUniqueResult = { ...adminOrder, status: 'DELIVERED' };
+
+      await expect(
+        service.updateOrderStatus(77, { status: 'CANCELLED' }, 5),
+      ).rejects.toThrow(
+        new ConflictException(
+          'Cannot change order status from DELIVERED to CANCELLED',
+        ),
+      );
+      expect(capturedRestockArgs).toHaveLength(0);
+      expect(movementCreateCalls).toBe(0);
+    });
+
+    it('returns 404 for a missing order', async () => {
+      txOrderFindUniqueResult = null;
+
+      await expect(
+        service.updateOrderStatus(99, { status: 'CONFIRMED' }, 5),
+      ).rejects.toThrow(new NotFoundException('Order 99 was not found'));
+      expect(capturedOrderUpdateArgs).toHaveLength(0);
     });
   });
 });

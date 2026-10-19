@@ -14,6 +14,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import type { ListAdminOrdersQueryDto } from './dto/list-admin-orders-query.dto';
 import { CheckoutDto } from './dto/checkout.dto';
 import type { ListOrdersQueryDto } from './dto/list-orders-query.dto';
+import type { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 
 const ORDER_SELECT = {
   id: true,
@@ -39,6 +40,16 @@ const ADMIN_ORDER_SELECT = {
   ...ORDER_SELECT,
   customer: { select: { id: true, email: true, fullName: true } },
 } satisfies Prisma.OrderSelect;
+
+/** Approved order status transitions (docs/BUSINESS_RULES.md §6). */
+const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
+  PENDING: ['CONFIRMED', 'CANCELLED'],
+  CONFIRMED: ['PROCESSING', 'CANCELLED'],
+  PROCESSING: ['SHIPPED', 'CANCELLED'],
+  SHIPPED: ['DELIVERED'],
+  DELIVERED: [],
+  CANCELLED: [],
+};
 
 export interface OrderItemRecord {
   id: number;
@@ -281,5 +292,61 @@ export class OrdersService {
       throw new NotFoundException(`Order ${orderId} was not found`);
     }
     return order;
+  }
+
+  /**
+   * Admin view: moves an order to a new status following the approved
+   * transition matrix. Cancelling an order restores the deducted stock
+   * atomically, writing CANCELLATION ledger movements per item; items whose
+   * product was deleted since the sale (productId null) are skipped.
+   */
+  async updateOrderStatus(
+    orderId: number,
+    dto: UpdateOrderStatusDto,
+    actorId: number,
+  ): Promise<AdminOrderRecord> {
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        select: ADMIN_ORDER_SELECT,
+      });
+      if (!order) {
+        throw new NotFoundException(`Order ${orderId} was not found`);
+      }
+
+      const allowed = ALLOWED_TRANSITIONS[order.status];
+      if (!allowed.includes(dto.status)) {
+        throw new ConflictException(
+          `Cannot change order status from ${order.status} to ${dto.status}`,
+        );
+      }
+
+      if (dto.status === OrderStatus.CANCELLED) {
+        for (const item of order.items) {
+          if (item.productId === null) {
+            continue;
+          }
+          await tx.product.update({
+            where: { id: item.productId },
+            data: { stock: { increment: item.quantity } },
+          });
+          await tx.inventoryMovement.create({
+            data: {
+              productId: item.productId,
+              delta: item.quantity,
+              reason: MovementReason.CANCELLATION,
+              note: `Order #${order.id}`,
+              createdById: actorId,
+            },
+          });
+        }
+      }
+
+      return tx.order.update({
+        where: { id: orderId },
+        data: { status: dto.status },
+        select: ADMIN_ORDER_SELECT,
+      });
+    });
   }
 }

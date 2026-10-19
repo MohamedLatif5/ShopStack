@@ -1,6 +1,16 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiConflictResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -8,12 +18,14 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { AdminGuard } from '../auth/guards/admin.guard';
+import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { ProductParamsDto } from '../catalog/dto/product-params.dto';
 import { ListAdminOrdersQueryDto } from './dto/list-admin-orders-query.dto';
 import {
   AdminOrderResponseDto,
   ListAdminOrdersResponseDto,
 } from './dto/admin-order-response.dto';
+import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { OrdersService } from './orders.service';
 
 @ApiTags('Admin Orders')
@@ -41,5 +53,20 @@ export class AdminOrdersController {
   @ApiNotFoundResponse({ description: 'No such order' })
   getOne(@Param() params: ProductParamsDto): Promise<AdminOrderResponseDto> {
     return this.orders.getOrder(params.id);
+  }
+
+  @Patch(':id')
+  @ApiOperation({
+    summary: 'Move an order to a new status (approved transitions only)',
+  })
+  @ApiOkResponse({ type: AdminOrderResponseDto })
+  @ApiConflictResponse({ description: 'Transition not allowed' })
+  @ApiNotFoundResponse({ description: 'No such order' })
+  updateStatus(
+    @Param() params: ProductParamsDto,
+    @Body() dto: UpdateOrderStatusDto,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<AdminOrderResponseDto> {
+    return this.orders.updateOrderStatus(params.id, dto, request.user.userId);
   }
 }
