@@ -128,6 +128,37 @@ Errors: `400` invalid shipping details or an empty cart, `409` a cart product is
 }
 ```
 
+## Orders
+
+Every customer sees only their own orders — past and present. A `Bearer` token is required; another customer's order id behaves exactly like a missing one (`404`).
+
+| Endpoint | Description |
+| --- | --- |
+| `GET /orders` | List the customer's orders, newest first, paginated (`page`, `limit` up to 100) |
+| `GET /orders/:id` | Return one of the customer's orders with its item snapshots |
+
+## Admin Orders
+
+Admins can inspect and advance every order. Transitions follow the approved matrix — anything else is a `409`:
+
+```
+PENDING → CONFIRMED | CANCELLED
+CONFIRMED → PROCESSING | CANCELLED
+PROCESSING → SHIPPED | CANCELLED
+SHIPPED → DELIVERED
+DELIVERED, CANCELLED — terminal
+```
+
+| Endpoint | Description |
+| --- | --- |
+| `GET /admin/orders` | List all orders, newest first, paginated, optional `status` filter |
+| `GET /admin/orders/:id` | Return any order with its customer |
+| `PATCH /admin/orders/:id/status` | Move an order to a new status (`{ "status": "..." }`) |
+
+Cancelling an order restores the deducted stock atomically in the same transaction that flips the status: each still-existing product gets its units back plus a `CANCELLATION` movement in the ledger (items whose product was deleted since the sale are skipped — the snapshot keeps the history). `CANCELLED` is terminal, so a cancelled order can never be cancelled — or restocked — twice.
+
+Errors: `400` invalid payload, `404` missing order, `409` transition not allowed.
+
 ## Admin Catalog
 
 Catalog management is admin-only: every `/admin/*` endpoint requires an admin Bearer token and answers `401` (no/invalid token) or `403` (non-admin account) otherwise.
@@ -182,4 +213,4 @@ Errors: `400` invalid payload, `404` missing product, `409` insufficient stock.
 
 ## Status
 
-Work in progress. Features are added one at a time, each one tested before moving to the next. Currently implemented: the database foundation, the public product catalog (list, details, pagination, filters, Swagger), authentication (register, login, JWT guard, admin guard), admin catalog management (products and categories), the inventory ledger (atomic stock adjustments with a full movement history), the shopping cart (add, view, update, remove), and cash-on-delivery checkout with price snapshots and concurrency-safe stock.
+Work in progress. Features are added one at a time, each one tested before moving to the next. Currently implemented: the database foundation, the public product catalog (list, details, pagination, filters, Swagger), authentication (register, login, JWT guard, admin guard), admin catalog management (products and categories), the inventory ledger (atomic stock adjustments with a full movement history), the shopping cart (add, view, update, remove), cash-on-delivery checkout with price snapshots and concurrency-safe stock, and order management (customer history plus admin status transitions with cancellation restock).
