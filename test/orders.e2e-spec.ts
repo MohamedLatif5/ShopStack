@@ -57,6 +57,7 @@ describe('Customer order history (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
   let customerJwt: string;
+  let customerId: number;
   let productId: number;
   let firstOrderId: number;
   let secondOrderId: number;
@@ -78,7 +79,14 @@ describe('Customer order history (e2e)', () => {
     await register(email);
     const jwt = await login(email);
     const user = await prisma.user.findUnique({ where: { email } });
-    return { jwt, id: user?.id ?? 0 };
+    return { jwt, id: user?.id ?? 0, email };
+  };
+
+  const makeAdmin = async () => {
+    const email = `admin-e2e-${++userCounter}@shopstack.dev`;
+    await register(email);
+    await prisma.user.update({ where: { email }, data: { role: 'ADMIN' } });
+    return login(email);
   };
 
   const addToCart = (jwt: string, quantity: number) =>
@@ -113,6 +121,7 @@ describe('Customer order history (e2e)', () => {
 
     const customer = await makeCustomer();
     customerJwt = customer.jwt;
+    customerId = customer.id;
 
     const product = await prisma.product.create({
       data: { name: 'History Notebook', pricePiasters: 1500, stock: 50 },
@@ -257,6 +266,108 @@ describe('Customer order history (e2e)', () => {
       await request(app.getHttpServer())
         .get(`/orders/${id}`)
         .set('Authorization', `Bearer ${customerJwt}`)
+        .expect(400);
+    });
+  });
+
+  describe('admin order views', () => {
+    it('rejects anonymous and non-admin requests', async () => {
+      const adminJwt = await makeAdmin();
+      await request(app.getHttpServer()).get('/admin/orders').expect(401);
+      await request(app.getHttpServer())
+        .get('/admin/orders')
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .expect(403);
+      await request(app.getHttpServer())
+        .get(`/admin/orders/${firstOrderId}`)
+        .set('Authorization', `Bearer ${customerJwt}`)
+        .expect(403);
+      await request(app.getHttpServer())
+        .get('/admin/orders')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(200);
+    });
+
+    it('lists every order newest first with the owning customer', async () => {
+      const adminJwt = await makeAdmin();
+      const other = await makeCustomer();
+      await addToCart(other.jwt, 3).expect(201);
+      const third = await checkout(other.jwt).expect(201);
+      const thirdOrderId = (third.body as OrderResponse).id;
+
+      const res = await request(app.getHttpServer())
+        .get('/admin/orders')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(200);
+
+      const body = res.body as OrderListResponse & {
+        items: Array<
+          OrderResponse & {
+            customer: { id: number; email: string; fullName: string | null };
+          }
+        >;
+      };
+      expect(body.meta.total).toBe(3);
+      expect(body.items.map((order) => order.id)).toEqual([
+        thirdOrderId,
+        secondOrderId,
+        firstOrderId,
+      ]);
+      expect(body.items[0]?.customer).toMatchObject({
+        id: other.id,
+        email: other.email,
+      });
+      expect(body.items[1]?.customer.id).toBe(customerId);
+    });
+
+    it('filters by status', async () => {
+      const adminJwt = await makeAdmin();
+
+      const res = await request(app.getHttpServer())
+        .get('/admin/orders?status=PENDING')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(200);
+      expect((res.body as OrderListResponse).meta.total).toBe(2);
+
+      const res2 = await request(app.getHttpServer())
+        .get('/admin/orders?status=DELIVERED')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(200);
+      expect((res2.body as OrderListResponse).meta.total).toBe(0);
+    });
+
+    it('rejects an invalid status filter', async () => {
+      const adminJwt = await makeAdmin();
+      await request(app.getHttpServer())
+        .get('/admin/orders?status=BOGUS')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(400);
+    });
+
+    it('returns any single order with its customer', async () => {
+      const adminJwt = await makeAdmin();
+      const res = await request(app.getHttpServer())
+        .get(`/admin/orders/${secondOrderId}`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(200);
+
+      const order = res.body as OrderResponse & {
+        customer: { id: number; email: string };
+      };
+      expect(order.id).toBe(secondOrderId);
+      expect(order.customer.id).toBe(customerId);
+      expect(order.customer.email).toContain('history-e2e-');
+    });
+
+    it('returns 404 for a missing order and 400 for a bad id', async () => {
+      const adminJwt = await makeAdmin();
+      await request(app.getHttpServer())
+        .get('/admin/orders/999999')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(404);
+      await request(app.getHttpServer())
+        .get('/admin/orders/abc')
+        .set('Authorization', `Bearer ${adminJwt}`)
         .expect(400);
     });
   });

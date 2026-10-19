@@ -11,6 +11,7 @@ import {
   ProductStatus,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import type { ListAdminOrdersQueryDto } from './dto/list-admin-orders-query.dto';
 import { CheckoutDto } from './dto/checkout.dto';
 import type { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 
@@ -32,6 +33,11 @@ const ORDER_SELECT = {
       quantity: true,
     },
   },
+} satisfies Prisma.OrderSelect;
+
+const ADMIN_ORDER_SELECT = {
+  ...ORDER_SELECT,
+  customer: { select: { id: true, email: true, fullName: true } },
 } satisfies Prisma.OrderSelect;
 
 export interface OrderItemRecord {
@@ -67,6 +73,26 @@ interface CartLine {
 
 export interface ListOrdersResult {
   items: OrderRecord[];
+  meta: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface OrderCustomer {
+  id: number;
+  email: string;
+  fullName: string | null;
+}
+
+export interface AdminOrderRecord extends OrderRecord {
+  customer: OrderCustomer;
+}
+
+export interface ListAdminOrdersResult {
+  items: AdminOrderRecord[];
   meta: {
     page: number;
     limit: number;
@@ -208,6 +234,48 @@ export class OrdersService {
     const order = await this.prisma.order.findFirst({
       where: { id: orderId, customerId },
       select: ORDER_SELECT,
+    });
+    if (!order) {
+      throw new NotFoundException(`Order ${orderId} was not found`);
+    }
+    return order;
+  }
+
+  /** Admin view: lists every order, newest first, optionally per status. */
+  async listOrders(
+    query: ListAdminOrdersQueryDto,
+  ): Promise<ListAdminOrdersResult> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const where = query.status ? { status: query.status } : {};
+
+    const [items, total] = await Promise.all([
+      this.prisma.order.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+        select: ADMIN_ORDER_SELECT,
+      }),
+      this.prisma.order.count({ where }),
+    ]);
+
+    return {
+      items,
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /** Admin view: returns any single order with its customer. */
+  async getOrder(orderId: number): Promise<AdminOrderRecord> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: ADMIN_ORDER_SELECT,
     });
     if (!order) {
       throw new NotFoundException(`Order ${orderId} was not found`);

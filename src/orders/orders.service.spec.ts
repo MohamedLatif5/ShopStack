@@ -6,7 +6,7 @@ import {
 import { ProductStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CheckoutDto } from './dto/checkout.dto';
-import type { OrderRecord } from './orders.service';
+import type { AdminOrderRecord, OrderRecord } from './orders.service';
 import { OrdersService } from './orders.service';
 
 const dto: CheckoutDto = {
@@ -50,6 +50,11 @@ const createdOrder = {
   items: [],
 } as unknown as OrderRecord;
 
+const adminOrder = {
+  ...createdOrder,
+  customer: { id: 42, email: 'sara@example.com', fullName: 'Sara Ali' },
+} as unknown as AdminOrderRecord;
+
 describe('OrdersService', () => {
   let service: OrdersService;
 
@@ -74,6 +79,7 @@ describe('OrdersService', () => {
   let orderFindManyResult: OrderRecord[] = [];
   let orderCountResult = 0;
   let orderFindFirstResult: OrderRecord | null = createdOrder;
+  let orderFindUniqueResult: AdminOrderRecord | null = adminOrder;
 
   let orderCreateCalls = 0;
   let movementCreateCalls = 0;
@@ -86,6 +92,7 @@ describe('OrdersService', () => {
   }> = [];
   const capturedOrderCountArgs: Array<{ where?: unknown }> = [];
   const capturedOrderFindFirstArgs: Array<{ where?: unknown }> = [];
+  const capturedOrderFindUniqueArgs: Array<{ where?: unknown }> = [];
 
   beforeEach(() => {
     capturedUpdateManyArgs.length = 0;
@@ -95,11 +102,13 @@ describe('OrdersService', () => {
     capturedOrderFindManyArgs.length = 0;
     capturedOrderCountArgs.length = 0;
     capturedOrderFindFirstArgs.length = 0;
+    capturedOrderFindUniqueArgs.length = 0;
     cartLinesResult = [alphaLine, betaLine];
     updateManyResult = { count: 1 };
-    orderFindManyResult = [createdOrder];
+    orderFindManyResult = [adminOrder];
     orderCountResult = 12;
     orderFindFirstResult = createdOrder;
+    orderFindUniqueResult = adminOrder;
     orderCreateCalls = 0;
     movementCreateCalls = 0;
 
@@ -171,6 +180,10 @@ describe('OrdersService', () => {
         findFirst: jest.fn((args: { where?: unknown }) => {
           capturedOrderFindFirstArgs.push(args);
           return Promise.resolve(orderFindFirstResult);
+        }),
+        findUnique: jest.fn((args: { where?: unknown }) => {
+          capturedOrderFindUniqueArgs.push(args);
+          return Promise.resolve(orderFindUniqueResult);
         }),
       },
     } as unknown as PrismaService;
@@ -291,6 +304,8 @@ describe('OrdersService', () => {
 
   describe('listMyOrders', () => {
     it('scopes the query to the token customer, newest first, paginated', async () => {
+      orderFindManyResult = [createdOrder];
+
       const result = await service.listMyOrders(42, { page: 2, limit: 5 });
 
       expect(result).toEqual({
@@ -342,6 +357,56 @@ describe('OrdersService', () => {
 
       await expect(service.getMyOrder(42, 77)).rejects.toThrow(
         new NotFoundException('Order 77 was not found'),
+      );
+    });
+  });
+
+  describe('listOrders (admin)', () => {
+    it('lists every order, newest first, without a filter', async () => {
+      const result = await service.listOrders({});
+
+      expect(result).toEqual({
+        items: [adminOrder],
+        meta: { page: 1, limit: 10, total: 12, totalPages: 2 },
+      });
+      expect(capturedOrderFindManyArgs[0]).toMatchObject({
+        where: {},
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: 0,
+        take: 10,
+      });
+    });
+
+    it('filters by status when provided', async () => {
+      await service.listOrders({ status: 'PENDING' });
+
+      expect(capturedOrderFindManyArgs[0]?.where).toEqual({
+        status: 'PENDING',
+      });
+      expect(capturedOrderCountArgs[0]?.where).toEqual({ status: 'PENDING' });
+    });
+
+    it('paginates with page and limit', async () => {
+      await service.listOrders({ page: 3, limit: 5 });
+
+      expect(capturedOrderFindManyArgs[0]?.skip).toBe(10);
+      expect(capturedOrderFindManyArgs[0]?.take).toBe(5);
+    });
+  });
+
+  describe('getOrder (admin)', () => {
+    it('returns any order with its customer', async () => {
+      const result = await service.getOrder(77);
+
+      expect(result).toBe(adminOrder);
+      expect(capturedOrderFindUniqueArgs[0]?.where).toEqual({ id: 77 });
+    });
+
+    it('returns 404 for a missing order', async () => {
+      orderFindUniqueResult = null;
+
+      await expect(service.getOrder(999)).rejects.toThrow(
+        new NotFoundException('Order 999 was not found'),
       );
     });
   });
